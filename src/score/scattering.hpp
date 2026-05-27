@@ -27,8 +27,11 @@
 //
 
 #include "core/field.hpp"
+#include "core/grid.hpp"
 #include "core/types.hpp"
 #include "score/energy.hpp"
+
+#include <type_traits>
 
 namespace wavelab {
 
@@ -42,6 +45,37 @@ struct ProbeRegion2D {
         return region_energy_2d(u_curr, u_prev, c, dt, lo, hi);
     }
 };
+
+struct ProbeRegion3D {
+    IVec<3> lo{};   // inclusive lower indices
+    IVec<3> hi{};   // inclusive upper indices
+
+    Real energy(Field<Real, 3> const& u_curr,
+                Field<Real, 3> const& u_prev,
+                Real c, Real dt) const noexcept {
+        return region_energy_3d(u_curr, u_prev, c, dt, lo, hi);
+    }
+};
+
+// Dim-generic factory: build a probe region from a center cell + half-
+// width (in cells), clamped to the grid. Used by wavecli's --region
+// flag and by auto-region derivation from a ligand bounding box.
+template <int D>
+inline auto make_probe_region(Grid<D> const& g,
+                              IVec<D> center,
+                              Index half_width_cells) {
+    using Region = std::conditional_t<D == 2, ProbeRegion2D, ProbeRegion3D>;
+    Region r{};
+    for (std::size_t d = 0; d < static_cast<std::size_t>(D); ++d) {
+        Index lo = center[d] - half_width_cells;
+        Index hi = center[d] + half_width_cells;
+        if (lo < 0)              lo = 0;
+        if (hi >= g.shape[d])    hi = g.shape[d] - 1;
+        r.lo[d] = lo;
+        r.hi[d] = hi;
+    }
+    return r;
+}
 
 // Ratio: E(post) / E(reference). Used for both R_E (§15: pocket+ligand /
 // pocket) and scattering loss (§16: 1 - E_out / E_in).

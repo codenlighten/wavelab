@@ -111,6 +111,13 @@ struct Args {
     bool        place_at_set = false;
     Vec<3>      place_at{0.0_r, 0.0_r, 0.0_r};
     bool        include_hetatm = false;
+
+    // §15 regional R_E (sum energy in a box around the ligand placement
+    // instead of over the whole domain — discriminates ligand
+    // perturbation from pocket-dominated total energy).
+    bool        region_set    = false;
+    Vec<3>      region_center{0.0_r, 0.0_r, 0.0_r};
+    Real        region_half   = 5.0_r;     // half-width in Å
 };
 
 void print_usage() {
@@ -141,6 +148,10 @@ void print_usage() {
     std::puts("  --add-pdb F      load + merge additional atoms from PDB");
     std::puts("  --place-at X,Y,Z center added atoms at world coord");
     std::puts("  --include-hetatm include HETATM records when parsing --pdb");
+    std::puts("  --region X,Y,Z,R world-coord center + half-width (Å) for");
+    std::puts("                   regional_energy (§15 regional R_E).");
+    std::puts("                   Auto-derived from placement when --add-sdf is");
+    std::puts("                   given (defaults to half-width 5 Å around place_at).");
     std::puts("  --prototype <dir> compute binder_correlation vs prototype");
     std::puts("  --csv <path>     append CSV row to <path>");
 }
@@ -210,6 +221,17 @@ std::optional<Args> parse_args(int argc, char** argv) {
             }
             a.place_at = Vec<3>{x, y, z};
             a.place_at_set = true;
+        }
+        else if (s == "--region")    {
+            char const* v = need("--region");
+            Real x, y, z, r;
+            if (std::sscanf(v, "%g,%g,%g,%g", &x, &y, &z, &r) != 4) {
+                std::fprintf(stderr, "--region expects X,Y,Z,R (got %s)\n", v);
+                std::exit(2);
+            }
+            a.region_center = Vec<3>{x, y, z};
+            a.region_half   = r;
+            a.region_set    = true;
         }
         else { std::fprintf(stderr, "unknown arg: %.*s\n", static_cast<int>(s.size()), s.data()); std::exit(2); }
     }
@@ -341,9 +363,14 @@ Grid<D> make_grid(Args const& a, Vec<D> origin) {
 
 template <int D>
 IVec<D> default_source_loc(Args const& a) {
-    // Source ~ "left edge, on-axis": just inside any PML, mid-y (mid-z if 3D).
+    // 2D: source on left edge, mid-y (centered protein is far enough from
+    // left edge that mid-y is fine).
+    // 3D: source in a grid CORNER, well outside protein bbox. Centered
+    // 3D defaults like (25, ny/2, nz/2) land near the protein center,
+    // which puts the source inside the regional probe and washes out
+    // ligand-induced perturbation.
     if constexpr (D == 2) return IVec<2>{Index{25}, a.ny / 2};
-    else                  return IVec<3>{Index{25}, a.ny / 2, a.nz / 2};
+    else                  return IVec<3>{Index{25}, Index{25}, Index{25}};
 }
 
 template <int D>
@@ -437,6 +464,45 @@ int run_pipeline(Args const& a, MolecularScene<D> scene) {
     fp.scene_name = a.subject;
     fp.scalars["total_energy"] = total_energy<D>(
         sim.current(), sim.previous(), sim.wave_speed(), dt);
+
+    // Regional energy (§15 regional R_E support). Active when either
+    // --region is supplied OR the user added a ligand (in which case
+    // the region defaults to a box around the placement point).
+    bool has_region = a.region_set
+                   || !a.add_sdf_path.empty()
+                   || !a.add_pdb_path.empty();
+    if constexpr (D == 2 || D == 3) {
+        if (has_region) {
+            Vec<3> rc = a.region_set ? a.region_center : a.place_at;
+            // If not user-set, also fall back to scene centroid when
+            // no place_at was given.
+            if (!a.region_set && !a.place_at_set && !scene.atoms.empty()) {
+                Vec<D> pc{};
+                for (auto const& at : scene.atoms)
+                    for (std::size_t d = 0; d < static_cast<std::size_t>(D); ++d)
+                        pc[d] += at.pos[d];
+                Real const inv = Real{1} / static_cast<Real>(scene.atoms.size());
+                for (std::size_t d = 0; d < static_cast<std::size_t>(D); ++d) {
+                    rc[d] = pc[d] * inv;
+                }
+            }
+            // World → cell index (round, then clamp via make_probe_region).
+            IVec<D> center{};
+            for (std::size_t d = 0; d < static_cast<std::size_t>(D); ++d) {
+                center[d] = static_cast<Index>(std::round(
+                    (rc[d] - grid.origin[d]) / grid.spacing[d]));
+            }
+            Index const half_cells = static_cast<Index>(std::ceil(a.region_half / grid.spacing[0]));
+            auto region = make_probe_region<D>(grid, center, half_cells);
+            fp.scalars["regional_energy"] = region.energy(
+                sim.current(), sim.previous(), sim.wave_speed(), dt);
+            fp.meta["region_center_x"] = std::to_string(static_cast<double>(rc[0]));
+            fp.meta["region_center_y"] = std::to_string(static_cast<double>(rc[1]));
+            if constexpr (D == 3) fp.meta["region_center_z"] = std::to_string(static_cast<double>(rc[2]));
+            fp.meta["region_half_A"]   = std::to_string(static_cast<double>(a.region_half));
+            fp.meta["region_half_cells"] = std::to_string(half_cells);
+        }
+    }
 
     Field<Real, D> e_field(grid, 0.0_r);
     energy_density_field<D>(e_field, sim.current(), sim.previous(),
