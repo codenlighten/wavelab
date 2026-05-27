@@ -118,6 +118,15 @@ struct Args {
     bool        region_set    = false;
     Vec<3>      region_center{0.0_r, 0.0_r, 0.0_r};
     Real        region_half   = 5.0_r;     // half-width in Å
+
+    // Explicit source placement in world coords. Default is a grid
+    // corner (or near-edge for 2D), which is fine for "wave propagates
+    // across protein into pocket" geometries. For in-pocket scoring
+    // (§15 small-ligand discrimination), placing the source AT the
+    // pocket centroid puts the ligand in the source's near-field —
+    // ligand chemistry registers immediately and at sharper amplitude.
+    bool        source_at_set = false;
+    Vec<3>      source_at{0.0_r, 0.0_r, 0.0_r};
 };
 
 void print_usage() {
@@ -152,6 +161,9 @@ void print_usage() {
     std::puts("                   regional_energy (§15 regional R_E).");
     std::puts("                   Auto-derived from placement when --add-sdf is");
     std::puts("                   given (defaults to half-width 5 Å around place_at).");
+    std::puts("  --source-at X,Y,Z place the source at this world coord");
+    std::puts("                    (default: grid corner). In-pocket source mode");
+    std::puts("                    puts the ligand in the source's near-field.");
     std::puts("  --prototype <dir> compute binder_correlation vs prototype");
     std::puts("  --csv <path>     append CSV row to <path>");
 }
@@ -232,6 +244,16 @@ std::optional<Args> parse_args(int argc, char** argv) {
             a.region_center = Vec<3>{x, y, z};
             a.region_half   = r;
             a.region_set    = true;
+        }
+        else if (s == "--source-at") {
+            char const* v = need("--source-at");
+            Real x, y, z;
+            if (std::sscanf(v, "%g,%g,%g", &x, &y, &z) != 3) {
+                std::fprintf(stderr, "--source-at expects X,Y,Z (got %s)\n", v);
+                std::exit(2);
+            }
+            a.source_at = Vec<3>{x, y, z};
+            a.source_at_set = true;
         }
         else { std::fprintf(stderr, "unknown arg: %.*s\n", static_cast<int>(s.size()), s.data()); std::exit(2); }
     }
@@ -363,14 +385,26 @@ Grid<D> make_grid(Args const& a, Vec<D> origin) {
 
 template <int D>
 IVec<D> default_source_loc(Args const& a) {
-    // 2D: source on left edge, mid-y (centered protein is far enough from
-    // left edge that mid-y is fine).
-    // 3D: source in a grid CORNER, well outside protein bbox. Centered
-    // 3D defaults like (25, ny/2, nz/2) land near the protein center,
-    // which puts the source inside the regional probe and washes out
-    // ligand-induced perturbation.
+    // 2D: source on left edge, mid-y.
+    // 3D: source in a grid CORNER, well outside the protein bbox.
     if constexpr (D == 2) return IVec<2>{Index{25}, a.ny / 2};
     else                  return IVec<3>{Index{25}, Index{25}, Index{25}};
+}
+
+// Resolve source cell from --source-at (world coords) if given, else
+// fall back to default_source_loc. Used by run_pipeline<D>.
+template <int D>
+IVec<D> resolve_source(Args const& a, Grid<D> const& grid) {
+    if (!a.source_at_set) return default_source_loc<D>(a);
+    IVec<D> idx{};
+    for (std::size_t d = 0; d < static_cast<std::size_t>(D); ++d) {
+        Index c = static_cast<Index>(std::round(
+            (a.source_at[d] - grid.origin[d]) / grid.spacing[d]));
+        if (c < 0) c = 0;
+        if (c >= grid.shape[d]) c = grid.shape[d] - 1;
+        idx[d] = c;
+    }
+    return idx;
 }
 
 template <int D>
@@ -442,7 +476,7 @@ int run_pipeline(Args const& a, MolecularScene<D> scene) {
     FdtdCpuOmp<D> sim(grid, std::move(medium), dt);
     sim.set_boundary(make_dirichlet<D>());
 
-    IVec<D> src = default_source_loc<D>(a);
+    IVec<D> src = resolve_source<D>(a, grid);
     if (a.pulse_source) {
         sim.add_source(std::make_shared<GaussianPulse<D>>(
             src, /*amp=*/5.0_r, a.freq,

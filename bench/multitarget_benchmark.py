@@ -85,6 +85,7 @@ def score_pose(wavecli: Path, apo_pdb: Path, pose_file: Path,
                nx: int, ny: int, nz: int, dx: float,
                freq: float, steps: int,
                beta_q: float, region_half: float,
+               in_pocket_source: bool,
                out_fp: Path) -> dict:
     """Run wavecli on apo + this pose, return the parsed fingerprint."""
     cx, cy, cz = site_center
@@ -104,6 +105,8 @@ def score_pose(wavecli: Path, apo_pdb: Path, pose_file: Path,
         "--beta-q", f"{beta_q:.3f}",
         "-o", str(out_fp),
     ]
+    if in_pocket_source:
+        args += ["--source-at", f"{cx:.3f},{cy:.3f},{cz:.3f}"]
     run_wavecli(wavecli, args)
     with open(out_fp) as f:
         return json.load(f)
@@ -114,6 +117,7 @@ def score_apo(wavecli: Path, apo_pdb: Path,
               nx: int, ny: int, nz: int, dx: float,
               freq: float, steps: int,
               beta_q: float, region_half: float,
+              in_pocket_source: bool,
               out_fp: Path) -> dict:
     """Run wavecli on apo alone — for regional R_E denominator."""
     cx, cy, cz = site_center
@@ -130,6 +134,8 @@ def score_apo(wavecli: Path, apo_pdb: Path,
         "--beta-q", f"{beta_q:.3f}",
         "-o", str(out_fp),
     ]
+    if in_pocket_source:
+        args += ["--source-at", f"{cx:.3f},{cy:.3f},{cz:.3f}"]
     run_wavecli(wavecli, args)
     with open(out_fp) as f:
         return json.load(f)
@@ -176,7 +182,8 @@ def run_target(target: Target, *,
                num_modes: int,
                nx: int, ny: int, nz: int, dx: float,
                freq: float, steps: int,
-               beta_q: float, region_half: float) -> dict:
+               beta_q: float, region_half: float,
+               in_pocket_source: bool) -> dict:
     print(f"\n========== TARGET {target.code} ==========")
     print(f"  apo:    {target.apo_pdb.name}")
     print(f"  actives ({len(target.actives)}): {[a.name for a in target.actives]}")
@@ -193,6 +200,7 @@ def run_target(target: Target, *,
     print("  > running apo baseline...")
     apo_fp = score_apo(wavecli, target.apo_pdb, target.site_center,
                        nx, ny, nz, dx, freq, steps, beta_q, region_half,
+                       in_pocket_source,
                        fp_dir / "apo.fp.json")
     apo_region_E = apo_fp["scalars"].get("regional_energy", 0.0)
     print(f"    regional_energy(apo) = {apo_region_E:.6e}")
@@ -206,6 +214,7 @@ def run_target(target: Target, *,
         fp = score_pose(wavecli, target.apo_pdb, a.pdb,
                         target.site_center,
                         nx, ny, nz, dx, freq, steps, beta_q, region_half,
+                        in_pocket_source,
                         fp_dir / f"active_{a.name}.fp.json")
         active_fps.append((a.name, fp))
 
@@ -237,6 +246,7 @@ def run_target(target: Target, *,
                 fp = score_pose(wavecli, target.apo_pdb, pose,
                                 target.site_center,
                                 nx, ny, nz, dx, freq, steps, beta_q, region_half,
+                                in_pocket_source,
                                 fp_dir / f"decoy_{sdf.stem}_pose{i}.fp.json")
             except Exception as e:
                 print(f"    pose {i} score FAILED: {e}")
@@ -388,6 +398,8 @@ def main() -> int:
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--beta-q", type=float, default=0.5)
     ap.add_argument("--region-half", type=float, default=7.0)
+    ap.add_argument("--in-pocket-source", action="store_true",
+                    help="place source AT the binding site instead of grid corner")
     ap.add_argument("--work-dir", type=Path,
                     default=Path("/tmp/multitarget_bench"))
     args = ap.parse_args()
@@ -414,7 +426,8 @@ def main() -> int:
                            num_modes=args.num_modes,
                            nx=args.nx, ny=args.ny, nz=args.nz, dx=args.dx,
                            freq=args.freq, steps=args.steps,
-                           beta_q=args.beta_q, region_half=args.region_half)
+                           beta_q=args.beta_q, region_half=args.region_half,
+                           in_pocket_source=args.in_pocket_source)
             all_results.append(r)
         except Exception as e:
             print(f"\nTARGET {t.code} FAILED: {e}", file=sys.stderr)
