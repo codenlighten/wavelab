@@ -13,7 +13,11 @@ add_executable(wavelab_tests
     unit/test_energy_1d.cpp
     unit/test_similarity.cpp
     unit/test_fdtd_2d.cpp
-    integration/test_1ubq_pipeline.cpp)
+    unit/test_entropy.cpp
+    unit/test_spectral.cpp
+    unit/test_fingerprint.cpp
+    integration/test_1ubq_pipeline.cpp
+    integration/test_determinism.cpp)
 
 target_link_libraries(wavelab_tests PRIVATE
     wavelab::core
