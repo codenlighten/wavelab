@@ -78,10 +78,18 @@ def main() -> int:
     actives = sorted((data / "actives").glob("*.sdf"))
     decoys = sorted((data / "decoys").glob("*.sdf"))
 
+    # Probe defaults to (nx/2, ny/2) so we sample the field right where
+    # the ligand was placed (default placement = scene centroid, which
+    # maps to ~ mid-grid in cell coords). That gives much sharper signal
+    # than the standard downstream probe at 3*nx/4.
+    probe_i = args.nx // 2
+    probe_j = args.ny // 2
+
     common = ["--nx", str(args.nx), "--ny", str(args.ny),
               "--dx", str(args.dx), "--steps", str(args.steps),
               "--freq", str(args.freq),
-              "--beta-rho", str(args.beta_rho)]
+              "--beta-rho", str(args.beta_rho),
+              "--probe", f"{probe_i},{probe_j}"]
     if args.beta_q != 0:
         common += ["--beta-q", str(args.beta_q)]
     if args.pulse:
@@ -130,13 +138,13 @@ def main() -> int:
     rows.sort(key=lambda r: r["perturbation"], reverse=True)
 
     print()
-    print(f"{'rank':>4} {'kind':>6} {'ligand':<15} {'R_E':>8} "
-          f"{'perturb':>10} {'atoms':>6}")
-    print("-" * 60)
+    print(f"{'rank':>4} {'kind':>6} {'ligand':<15} {'R_E':>10} "
+          f"{'perturb':>14} {'atoms':>6}")
+    print("-" * 70)
     for i, r in enumerate(rows, 1):
         marker = " **" if r["kind"] == "ACTIVE" else "   "
         print(f"{i:>4} {r['kind']:>6} {r['name']:<15} "
-              f"{r['R_E']:>8.4f} {r['perturbation']:>10.6f}{marker} "
+              f"{r['R_E']:>10.6f} {r['perturbation']:>12.4e}{marker} "
               f"{r['atoms']:>6d}")
 
     # Discriminate: build prototype from active p+l fingerprints, score

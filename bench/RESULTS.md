@@ -166,6 +166,75 @@ chemistry-defined rather than name-grouped. Either one alone gives
 the 0.68–0.76 partial signal; both together saturate the AUC on this
 test set.
 
+## Pocket + ligand (§15) — engine carries signal in context
+
+Wired `--add-sdf` / `--add-pdb` / `--place-at` into wavecli so the
+candidate ligand can be merged into a primary scene (a PDB pocket),
+translated to the pocket centroid (or user-chosen point). For each
+candidate:
+
+* run wavecli on the pocket alone
+* run wavecli on pocket + ligand (same placement, same probe)
+* compare
+
+Probe was moved to `(nx/2, ny/2)` — right *at* the ligand placement —
+so the recorded signal reflects local perturbation, not far-field
+washout. (Default `3*nx/4` probe gave perturbations of 1e-7 because
+the protein dominates the wave field; ligand contributions are lost
+in the noise downstream.)
+
+Results on 1ubq + the same 10 ligands as the ligand-alone test
+(tight steroid family, scaffold-only):
+
+```
+rank   kind ligand                 R_E        perturb  atoms
+----------------------------------------------------------------------
+   1  decoy caffeine          0.999413   5.5639e-01       121
+   2  decoy aspirin           0.999271   4.6983e-01       123
+   3  decoy glucose           0.999694   4.4096e-01       122
+   4 ACTIVE estradiol         0.999496   4.2419e-01 **    127
+   5 ACTIVE androsterone      0.996964   3.7058e-01 **    132
+   6 ACTIVE pregnenolone      1.001176   2.8993e-01 **    133
+   7 ACTIVE testosterone      0.997946   2.8048e-01 **    133
+   8 ACTIVE progesterone      0.996888   2.6365e-01 **    136
+   9  decoy acetaminophen     0.999547   1.9189e-04       119
+  10  decoy benzene           1.000000  -2.2204e-16       118
+
+pocket-context family-clustering AUC: 25/25 = 1.000
+perturbation  actives mean: 0.326   decoys mean: 0.293
+R_E           actives mean: 0.9985  decoys mean: 0.9996
+```
+
+**Three things to call out:**
+
+1. **R_E alone discriminates weakly.** Actives sit at 0.9985, decoys
+   at 0.9996 — both near 1.0; the scalar isn't sharp enough. The
+   §15 "ratio of total energies" concept may need a *region-of-interest*
+   variant (energy in the pocket-local region only) before it's
+   competitive with spectral comparison.
+
+2. **Perturbation magnitude is dominated by atoms-in-slice.** Benzene
+   contributed 0 atoms to the 4Å z-slice (its planar ring oriented
+   ⊥ to z) → near-machine-epsilon perturbation. Acetaminophen
+   contributed 1 atom → 0.0002 perturbation. Caffeine contributed 3
+   polar atoms → 0.56 perturbation. This is a slice-sampling
+   artifact, not a chemistry signal. The real fix is **3D wavecli**
+   (FdtdCpuOmp<3> + FdtdCuda<3> already exist in the engine; just
+   need to expose them through the CLI).
+
+3. **Cosine clustering against an active-only prototype gets the
+   discrimination right anyway: AUC = 1.000.** The pocket adds the
+   same constant background to every candidate's fingerprint, so the
+   pocket cancels in the relative comparison. This is the same
+   25/25 result as the ligand-alone test but now demonstrated *in
+   pocket context*, which is the framing the §15-§35 stack of the
+   overview was built for.
+
+The pocket+ligand pipeline works and preserves the discrimination
+the ligand-alone pipeline already had — the §15 architecture is
+sound; the per-candidate R_E scalar just isn't the right summary,
+and the 2D-slicing sampling artifact will need 3D wavecli to clear.
+
 ## What's still measured vs what isn't
 
 After this work the engine sees:
