@@ -1,0 +1,21 @@
+build/
+build-*/
+out/
+cmake-build-*/
+third_party/_deps/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.swp
+*~
+.cache/
+.vscode/
+.idea/
+compile_commands.json
+data/synthetic/*
+!data/synthetic/.gitkeep
+# Keep small canonical test PDBs in-repo; .gitignore larger custom uploads.
+data/pdb/custom/

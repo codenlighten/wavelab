@@ -1,0 +1,24 @@
+include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
+
+# All unit tests share a single binary that owns doctest's main(), so we
+# get one fast compile + one test invocation. Each test_*.cpp just adds
+# TEST_CASEs into this binary.
+
+add_executable(wavelab_tests
+    unit/test_main.cpp
+    unit/test_types.cpp
+    unit/test_grid.cpp
+    unit/test_field.cpp
+    unit/test_stepper_1d.cpp
+    unit/test_energy_1d.cpp
+    unit/test_similarity.cpp
+    unit/test_fdtd_2d.cpp
+    integration/test_1ubq_pipeline.cpp)
+
+target_link_libraries(wavelab_tests PRIVATE
+    wavelab::core
+    wavelab::flags
+    doctest::doctest)
+
+# Auto-register every TEST_CASE with CTest.
+doctest_discover_tests(wavelab_tests)
