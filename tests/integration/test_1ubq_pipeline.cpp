@@ -71,12 +71,49 @@ TEST_CASE("PDB parser: 1ubq with HETATM includes waters") {
     if (path.empty()) return;
     PdbParseOptions opts;
     opts.include_hetatm = true;
+    // Default behavior now excludes HOH/WAT/ions from HETATM (Phase 8.4
+    // hardening). 1ubq's HETATM are all waters, so we need to opt back
+    // in to count them.
+    opts.include_waters_ions = true;
     auto const r = parse_pdb_file(path, opts);
     CAPTURE(r.atom_count);
     CAPTURE(r.hetatm_count);
     CHECK(r.atom_count == 602);
     CHECK(r.hetatm_count == 58);
     CHECK(r.scene.atoms.size() == 660u);
+}
+
+TEST_CASE("PDB parser: default include_hetatm + waters excluded") {
+    auto path = locate_1ubq();
+    if (path.empty()) return;
+    PdbParseOptions opts;
+    opts.include_hetatm = true;
+    // include_waters_ions defaults to false → 1ubq's 58 HOH should be skipped.
+    auto const r = parse_pdb_file(path, opts);
+    CAPTURE(r.skipped_waters_ions);
+    CHECK(r.atom_count == 602);
+    CHECK(r.hetatm_count == 0);
+    CHECK(r.skipped_waters_ions == 58);
+    CHECK(r.scene.atoms.size() == 602u);
+}
+
+TEST_CASE("PDB parser: residue allowlist isolates a single residue") {
+    auto path = locate_1ubq();
+    if (path.empty()) return;
+    // 1ubq has no bound ligand HETATM, but we can confirm the allowlist
+    // mechanism by asking for just MET (the N-terminal methionine) and
+    // checking we get atoms from that residue alone.
+    PdbParseOptions opts;
+    opts.keep_residue_allowlist = std::set<std::string>{"MET"};
+    auto const r = parse_pdb_file(path, opts);
+    CAPTURE(r.atom_count);
+    CAPTURE(r.skipped_residue);
+    // 1ubq starts with Met1 — exactly one Met residue, 8 heavy + H atoms
+    // depending on the structure. Just verify "more than zero, less than
+    // the full 602 protein atoms".
+    CHECK(r.atom_count > 0);
+    CHECK(r.atom_count < 50);
+    CHECK(r.skipped_residue > 500);
 }
 
 // Density splatting integral check: for D-dimensional Gaussians of width σ,

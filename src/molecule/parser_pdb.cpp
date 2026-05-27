@@ -7,6 +7,7 @@
 #include <charconv>
 #include <fstream>
 #include <limits>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -80,6 +81,21 @@ std::string element_symbol_of(std::string_view line) {
     return {};
 }
 
+// Standard solvent / buffer / counter-ion residue names commonly seen
+// in HETATM blocks of crystallographic PDBs. Default behavior excludes
+// these so a co-crystal load doesn't silently splat waters into the
+// medium.
+bool is_water_or_ion(std::string_view res) {
+    static const std::set<std::string> kBlocklist = {
+        "HOH", "WAT", "DOD", "H2O",                          // water
+        "NA", "K", "CL", "BR", "I", "F",                     // monovalent ions
+        "MG", "CA", "ZN", "FE", "MN", "CU", "NI", "CO",      // metals
+        "SO4", "PO4", "HPO", "NO3",                          // counter-ions
+        "GOL", "EDO", "PEG", "DMS", "MPD", "FMT", "ACT",     // cryoprotectants / buffers
+    };
+    return kBlocklist.contains(std::string{res});
+}
+
 } // namespace
 
 PdbParseResult parse_pdb(std::istream& in, PdbParseOptions const& opts) {
@@ -108,6 +124,22 @@ PdbParseResult parse_pdb(std::istream& in, PdbParseOptions const& opts) {
         if (alt != ' ' && alt != opts.alt_loc_preference) {
             ++result.skipped_alt_loc;
             continue;
+        }
+
+        // Residue-name filtering (waters/ions + optional allowlist).
+        std::string_view res_name;
+        if (sv.size() >= kColResName + kLenResName) {
+            res_name = trim(sv.substr(kColResName, kLenResName));
+        }
+        if (is_hetatm && !opts.include_waters_ions && is_water_or_ion(res_name)) {
+            ++result.skipped_waters_ions;
+            continue;
+        }
+        if (opts.keep_residue_allowlist) {
+            if (!opts.keep_residue_allowlist->contains(std::string{res_name})) {
+                ++result.skipped_residue;
+                continue;
+            }
         }
 
         Real x, y, z;
@@ -154,6 +186,16 @@ PdbParseResult parse_pdb_file(std::filesystem::path const& path,
         throw std::runtime_error("parse_pdb_file: cannot open " + path.string());
     }
     return parse_pdb(in, opts);
+}
+
+MolecularScene<3> parse_pdb_hetatm_residue(std::filesystem::path const& path,
+                                           std::string const& residue) {
+    PdbParseOptions opts;
+    opts.include_hetatm = true;
+    opts.include_waters_ions = true;        // allowlist is the gate; don't double-filter
+    opts.keep_residue_allowlist = std::set<std::string>{residue};
+    auto r = parse_pdb_file(path, opts);
+    return std::move(r.scene);
 }
 
 } // namespace wavelab
