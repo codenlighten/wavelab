@@ -77,9 +77,31 @@ inline void apply_pml(Medium<D>& medium, PmlSpec const& spec = {}) {
                 }
             }
         }
-    } else {
-        static_assert(D == 1 || D == 2,
-            "apply_pml: D=3 lands in Phase 5");
+    } else if constexpr (D == 3) {
+        Index const nx = g.shape[0];
+        Index const ny = g.shape[1];
+        Index const nz = g.shape[2];
+        Real* a = medium.alpha.data();
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (Index i = 0; i < nx; ++i) {
+            for (Index j = 0; j < ny; ++j) {
+                Index const dx_left  = i;
+                Index const dx_right = nx - 1 - i;
+                Index const dy_bot   = j;
+                Index const dy_top   = ny - 1 - j;
+                for (Index k = 0; k < nz; ++k) {
+                    Index const dz_lo = k;
+                    Index const dz_hi = nz - 1 - k;
+                    Index const d = std::min({dx_left, dx_right,
+                                              dy_bot, dy_top,
+                                              dz_lo, dz_hi});
+                    if (d < L) {
+                        Index const idx = (i * ny + j) * nz + k;
+                        a[idx] = std::max(a[idx], profile(d));
+                    }
+                }
+            }
+        }
     }
 }
 

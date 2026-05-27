@@ -16,7 +16,9 @@ add_executable(wavelab_tests
     unit/test_entropy.cpp
     unit/test_spectral.cpp
     unit/test_fingerprint.cpp
+    unit/test_fdtd_3d.cpp
     integration/test_1ubq_pipeline.cpp
+    integration/test_1ubq_full_3d.cpp
     integration/test_determinism.cpp)
 
 target_link_libraries(wavelab_tests PRIVATE

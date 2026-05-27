@@ -82,9 +82,21 @@ inline void apply_index_slab(Medium<D>& medium, Real x_lo, Real x_hi,
                 }
             }
         }
-    } else {
-        static_assert(D == 1 || D == 2,
-            "apply_index_slab: D=3 lands in Phase 5");
+    } else if constexpr (D == 3) {
+        Index const nx = g.shape[0];
+        Index const ny = g.shape[1];
+        Index const nz = g.shape[2];
+        Real const  dx = g.spacing[0];
+        for (Index i = 0; i < nx; ++i) {
+            Real const xc = g.origin[0] + (static_cast<Real>(i) + 0.5_r) * dx;
+            if (xc >= x_lo && xc <= x_hi) {
+                for (Index j = 0; j < ny; ++j) {
+                    for (Index k = 0; k < nz; ++k) {
+                        medium.c(i, j, k) = c_inside;
+                    }
+                }
+            }
+        }
     }
 }
 

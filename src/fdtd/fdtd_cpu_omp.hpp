@@ -170,9 +170,54 @@ private:
                 un[i * ny + 0]        = Real{0};
                 un[i * ny + (ny - 1)] = Real{0};
             }
-        } else {
-            static_assert(D == 1 || D == 2,
-                "FdtdCpuOmp<D>: D=3 implemented in Phase 5");
+        } else if constexpr (D == 3) {
+            Index const nx = grid_.shape[0];
+            Index const ny = grid_.shape[1];
+            Index const nz = grid_.shape[2];
+            Index const sy = nz;          // y stride
+            Index const sx = ny * nz;     // x stride
+
+            #pragma omp parallel for collapse(3) schedule(static)
+            for (Index i = 1; i < nx - 1; ++i) {
+                for (Index j = 1; j < ny - 1; ++j) {
+                    for (Index k = 1; k < nz - 1; ++k) {
+                        Index const idx  = (i * ny + j) * nz + k;
+                        Real const c     = cf[idx];
+                        Real const alpha = af[idx];
+                        Real const lam   = c * dt_ * inv_dx;
+                        Real const lam2  = lam * lam;
+                        Real const a     = Real{2} - alpha * dt_;
+                        Real const b     = Real{1} - alpha * dt_;
+                        Real const lap   = uc[idx + sx] + uc[idx - sx]
+                                         + uc[idx + sy] + uc[idx - sy]
+                                         + uc[idx + 1]  + uc[idx - 1]
+                                         - Real{6} * uc[idx];
+                        un[idx] = a * uc[idx] - b * up[idx] + lam2 * lap;
+                    }
+                }
+            }
+            // Zero boundary faces. BC overrides.
+            #pragma omp parallel for collapse(2) schedule(static)
+            for (Index j = 0; j < ny; ++j) {
+                for (Index k = 0; k < nz; ++k) {
+                    un[(0  * ny + j) * nz + k]       = Real{0};
+                    un[((nx-1) * ny + j) * nz + k]   = Real{0};
+                }
+            }
+            #pragma omp parallel for collapse(2) schedule(static)
+            for (Index i = 0; i < nx; ++i) {
+                for (Index k = 0; k < nz; ++k) {
+                    un[(i * ny + 0) * nz + k]       = Real{0};
+                    un[(i * ny + (ny-1)) * nz + k]  = Real{0};
+                }
+            }
+            #pragma omp parallel for collapse(2) schedule(static)
+            for (Index i = 0; i < nx; ++i) {
+                for (Index j = 0; j < ny; ++j) {
+                    un[(i * ny + j) * nz + 0]       = Real{0};
+                    un[(i * ny + j) * nz + (nz-1)]  = Real{0};
+                }
+            }
         }
     }
 
@@ -213,6 +258,11 @@ inline void FdtdCpuOmp<1>::install_default_boundary_() {
 template <>
 inline void FdtdCpuOmp<2>::install_default_boundary_() {
     boundary_ = std::make_shared<Dirichlet2D>();
+}
+
+template <>
+inline void FdtdCpuOmp<3>::install_default_boundary_() {
+    boundary_ = std::make_shared<Dirichlet3D>();
 }
 
 } // namespace wavelab

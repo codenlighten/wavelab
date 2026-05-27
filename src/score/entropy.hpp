@@ -24,9 +24,11 @@
 namespace wavelab {
 
 // ----------------------------------------------------------------------
-// Shannon entropy of normalized energy distribution
+// Shannon entropy of normalized energy distribution. Dim-generic: only
+// uses linear .size()/.data() access, so the same code handles D=1/2/3.
 // ----------------------------------------------------------------------
-inline Real energy_entropy(Field<Real, 2> const& e) noexcept {
+template <int D>
+inline Real energy_entropy(Field<Real, D> const& e) noexcept {
     Index const n = e.size();
     Real total = 0.0_r;
     Real const* p = e.data();
@@ -49,8 +51,9 @@ inline Real energy_entropy(Field<Real, 2> const& e) noexcept {
 
 // Normalized "focus" score: 1 when all energy is in one cell (delta),
 // 0 when uniformly distributed (entropy = log(M)).
-inline Real focus_score(Field<Real, 2> const& e) noexcept {
-    Real const H = energy_entropy(e);
+template <int D>
+inline Real focus_score(Field<Real, D> const& e) noexcept {
+    Real const H = energy_entropy<D>(e);
     Real const log_M = std::log(static_cast<Real>(e.size()));
     if (log_M <= 0.0_r) return 0.0_r;
     return 1.0_r - H / log_M;
@@ -59,10 +62,11 @@ inline Real focus_score(Field<Real, 2> const& e) noexcept {
 // ----------------------------------------------------------------------
 // Hotspot concentration (§24): fraction of energy inside Ω_hot ⊂ Ω.
 // `mask` is a binary 0/1 field over the same grid as `e`; cells where
-// mask > 0 belong to Ω_hot.
+// mask > 0 belong to Ω_hot. Dim-generic.
 // ----------------------------------------------------------------------
-inline Real hotspot_concentration(Field<Real, 2> const& e,
-                                  Field<Real, 2> const& mask) noexcept {
+template <int D>
+inline Real hotspot_concentration(Field<Real, D> const& e,
+                                  Field<Real, D> const& mask) noexcept {
     Index const n = e.size();
     Real const* pe = e.data();
     Real const* pm = mask.data();
@@ -101,11 +105,12 @@ inline Real hotspot_concentration_region(Field<Real, 2> const& e,
 // ----------------------------------------------------------------------
 // Ligand occlusion (§25): fraction of EMPTY-pocket energy that resides
 // in the region the ligand would occupy. High value = ligand is
-// blocking important wave pathways.
+// blocking important wave pathways. Dim-generic.
 // ----------------------------------------------------------------------
-inline Real ligand_occlusion(Field<Real, 2> const& e_empty,
-                             Field<Real, 2> const& ligand_mask) noexcept {
-    return hotspot_concentration(e_empty, ligand_mask);
+template <int D>
+inline Real ligand_occlusion(Field<Real, D> const& e_empty,
+                             Field<Real, D> const& ligand_mask) noexcept {
+    return hotspot_concentration<D>(e_empty, ligand_mask);
 }
 
 } // namespace wavelab

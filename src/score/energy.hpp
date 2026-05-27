@@ -169,4 +169,86 @@ inline void energy_density_field_2d(Field<Real, 2>&       out,
     }
 }
 
+// ============================================================
+// 3D (Phase 5)
+// ============================================================
+
+inline Real energy_density_3d(Field<Real, 3> const& u_curr,
+                              Field<Real, 3> const& u_prev,
+                              Real c, Real dt,
+                              Index i, Index j, Index k) noexcept {
+    auto const& g = u_curr.grid();
+    Real const dx = g.spacing[0];
+    Real const dy = g.spacing[1];
+    Real const dz = g.spacing[2];
+    Index const nx = g.shape[0];
+    Index const ny = g.shape[1];
+    Index const nz = g.shape[2];
+
+    Real const du_dt = (u_curr(i, j, k) - u_prev(i, j, k)) / dt;
+    Real du_dx = Real{0}, du_dy = Real{0}, du_dz = Real{0};
+    if (i > 0 && i < nx - 1)
+        du_dx = (u_curr(i + 1, j, k) - u_curr(i - 1, j, k)) / (Real{2} * dx);
+    if (j > 0 && j < ny - 1)
+        du_dy = (u_curr(i, j + 1, k) - u_curr(i, j - 1, k)) / (Real{2} * dy);
+    if (k > 0 && k < nz - 1)
+        du_dz = (u_curr(i, j, k + 1) - u_curr(i, j, k - 1)) / (Real{2} * dz);
+
+    return Real{0.5} * du_dt * du_dt
+         + Real{0.5} * c * c * (du_dx * du_dx + du_dy * du_dy + du_dz * du_dz);
+}
+
+inline Real total_energy_3d(Field<Real, 3> const& u_curr,
+                            Field<Real, 3> const& u_prev,
+                            Real c, Real dt) noexcept {
+    auto const& g = u_curr.grid();
+    Index const nx = g.shape[0];
+    Index const ny = g.shape[1];
+    Index const nz = g.shape[2];
+    Real sum = Real{0};
+    #pragma omp parallel for reduction(+:sum) collapse(3) schedule(static)
+    for (Index i = 0; i < nx; ++i) {
+        for (Index j = 0; j < ny; ++j) {
+            for (Index k = 0; k < nz; ++k) {
+                sum += energy_density_3d(u_curr, u_prev, c, dt, i, j, k);
+            }
+        }
+    }
+    return sum;
+}
+
+inline Real region_energy_3d(Field<Real, 3> const& u_curr,
+                             Field<Real, 3> const& u_prev,
+                             Real c, Real dt,
+                             IVec<3> lo, IVec<3> hi) noexcept {
+    Real sum = Real{0};
+    #pragma omp parallel for reduction(+:sum) collapse(3) schedule(static)
+    for (Index i = lo[0]; i <= hi[0]; ++i) {
+        for (Index j = lo[1]; j <= hi[1]; ++j) {
+            for (Index k = lo[2]; k <= hi[2]; ++k) {
+                sum += energy_density_3d(u_curr, u_prev, c, dt, i, j, k);
+            }
+        }
+    }
+    return sum;
+}
+
+inline void energy_density_field_3d(Field<Real, 3>&       out,
+                                    Field<Real, 3> const& u_curr,
+                                    Field<Real, 3> const& u_prev,
+                                    Real c, Real dt) noexcept {
+    auto const& g = u_curr.grid();
+    Index const nx = g.shape[0];
+    Index const ny = g.shape[1];
+    Index const nz = g.shape[2];
+    #pragma omp parallel for collapse(3) schedule(static)
+    for (Index i = 0; i < nx; ++i) {
+        for (Index j = 0; j < ny; ++j) {
+            for (Index k = 0; k < nz; ++k) {
+                out(i, j, k) = energy_density_3d(u_curr, u_prev, c, dt, i, j, k);
+            }
+        }
+    }
+}
+
 } // namespace wavelab

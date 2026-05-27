@@ -7,6 +7,7 @@
 
 #include "viz/view_1d.hpp"
 #include "viz/view_2d.hpp"
+#include "viz/view_3d.hpp"
 
 #include <imgui.h>
 #include <raylib.h>
@@ -19,7 +20,7 @@ namespace {
 constexpr int kInitialWidth  = 1400;
 constexpr int kInitialHeight = 900;
 
-enum class ViewMode { Plot1D, Heatmap2D };
+enum class ViewMode { Plot1D, Heatmap2D, Slicer3D };
 
 } // namespace
 
@@ -32,14 +33,18 @@ int main() {
     ViewMode mode = ViewMode::Heatmap2D;
     std::unique_ptr<wavelab::View1D> view1d;
     std::unique_ptr<wavelab::View2D> view2d = std::make_unique<wavelab::View2D>();
+    std::unique_ptr<wavelab::View3D> view3d;
 
     while (!WindowShouldClose()) {
         if (mode == ViewMode::Plot1D) {
             if (!view1d) view1d = std::make_unique<wavelab::View1D>();
             view1d->update();
-        } else {
+        } else if (mode == ViewMode::Heatmap2D) {
             if (!view2d) view2d = std::make_unique<wavelab::View2D>();
             view2d->update();
+        } else {
+            if (!view3d) view3d = std::make_unique<wavelab::View3D>();
+            view3d->update();
         }
 
         BeginDrawing();
@@ -53,26 +58,25 @@ int main() {
             static_cast<float>(GetScreenWidth())  - ctrl_w - 2.0f * margin,
             static_cast<float>(GetScreenHeight()) - 2.0f * margin - 32.0f
         };
-        if (mode == ViewMode::Plot1D) view1d->draw_field(field_area);
-        else                          view2d->draw_field(field_area);
+        if (mode == ViewMode::Plot1D)         view1d->draw_field(field_area);
+        else if (mode == ViewMode::Heatmap2D) view2d->draw_field(field_area);
+        else                                  view3d->draw_field(field_area);
 
         rlImGuiBegin();
 
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("View")) {
-                if (ImGui::MenuItem("1D (Phase 1)", nullptr, mode == ViewMode::Plot1D)) {
-                    mode = ViewMode::Plot1D;
-                }
-                if (ImGui::MenuItem("2D (Phase 2)", nullptr, mode == ViewMode::Heatmap2D)) {
-                    mode = ViewMode::Heatmap2D;
-                }
+                if (ImGui::MenuItem("1D (Phase 1)",     nullptr, mode == ViewMode::Plot1D))    mode = ViewMode::Plot1D;
+                if (ImGui::MenuItem("2D (Phase 2)",     nullptr, mode == ViewMode::Heatmap2D)) mode = ViewMode::Heatmap2D;
+                if (ImGui::MenuItem("3D slicer (P5)",   nullptr, mode == ViewMode::Slicer3D))  mode = ViewMode::Slicer3D;
                 ImGui::EndMenu();
             }
             ImGui::EndMainMenuBar();
         }
 
-        if (mode == ViewMode::Plot1D) view1d->draw_controls();
-        else                          view2d->draw_controls();
+        if (mode == ViewMode::Plot1D)         view1d->draw_controls();
+        else if (mode == ViewMode::Heatmap2D) view2d->draw_controls();
+        else                                  view3d->draw_controls();
 
         rlImGuiEnd();
         EndDrawing();
@@ -80,6 +84,7 @@ int main() {
 
     view1d.reset();
     view2d.reset();
+    view3d.reset();
 
     rlImGuiShutdown();
     CloseWindow();
