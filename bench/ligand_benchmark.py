@@ -68,6 +68,10 @@ def main() -> int:
                     help="use broadband Gaussian pulse source")
     ap.add_argument("--beta-rho", type=float, default=0.3,
                     help="refractive-index weight per density unit")
+    ap.add_argument("--beta-q", type=float, default=0.0,
+                    help="polar/charge channel weight in n(x), 0 = off")
+    ap.add_argument("--beta-h", type=float, default=0.0,
+                    help="hydrophobic channel weight in n(x), 0 = off")
     args = ap.parse_args()
 
     root = args.root
@@ -89,6 +93,10 @@ def main() -> int:
               "--dx", str(args.dx), "--steps", str(args.steps),
               "--freq", str(args.freq),
               "--beta-rho", str(args.beta_rho)]
+    if args.beta_q != 0.0:
+        common += ["--beta-q", str(args.beta_q)]
+    if args.beta_h != 0.0:
+        common += ["--beta-h", str(args.beta_h)]
     if args.pulse:
         common.append("--pulse")
 

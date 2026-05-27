@@ -31,26 +31,35 @@ struct ElementParams {
 };
 
 // Bondi (1964) van-der-Waals radii for elements we care about most.
-// Hydrophobicity sign convention: positive = hydrophobic (C, S), negative
-// = hydrophilic (N, O), zero = neutral (H, ions).
+//
+// Partial charges are *electronegativity-derived pseudo-charges*, NOT
+// proper atom-type-aware partials (no Gasteiger / AMBER assignment yet).
+// They give the right qualitative ordering — O more negative than N
+// more negative than C; H slightly positive on average since most H
+// in organic molecules is bonded to C-N-O scaffolds and inherits some
+// dipolar character. Real partial charges per molecule are a Phase 8
+// concern (RDKit / Gasteiger / QM input).
+//
+// Hydrophobicity convention: positive = hydrophobic (C, S, halogens),
+// negative = hydrophilic (N, O), zero = neutral (H, ions).
 inline constexpr ElementParams kElementTable[] = {
-    //  Z  sym   σ(Å)  q     h
-    {   1, "H ", 1.20_r, 0.0_r,  0.0_r},
-    {   6, "C ", 1.70_r, 0.0_r,  1.0_r},
-    {   7, "N ", 1.55_r, 0.0_r, -1.0_r},
-    {   8, "O ", 1.52_r, 0.0_r, -1.0_r},
-    {  15, "P ", 1.80_r, 0.0_r,  0.0_r},
-    {  16, "S ", 1.80_r, 0.0_r,  0.5_r},
-    {   9, "F ", 1.47_r, 0.0_r, -0.5_r},
-    {  17, "CL", 1.75_r, 0.0_r,  0.0_r},
-    {  35, "BR", 1.85_r, 0.0_r,  0.0_r},
-    {  53, "I ", 1.98_r, 0.0_r,  0.0_r},
-    {  11, "NA", 2.27_r, 1.0_r,  0.0_r},
-    {  19, "K ", 2.75_r, 1.0_r,  0.0_r},
-    {  12, "MG", 1.73_r, 2.0_r,  0.0_r},
-    {  20, "CA", 2.31_r, 2.0_r,  0.0_r},
-    {  26, "FE", 2.00_r, 2.0_r,  0.0_r},
-    {  30, "ZN", 1.39_r, 2.0_r,  0.0_r},
+    //  Z  sym   σ(Å)    q       h
+    {   1, "H ", 1.20_r,  0.1_r,  0.0_r},
+    {   6, "C ", 1.70_r,  0.0_r,  1.0_r},
+    {   7, "N ", 1.55_r, -0.4_r, -1.0_r},
+    {   8, "O ", 1.52_r, -0.5_r, -1.0_r},
+    {  15, "P ", 1.80_r,  0.5_r,  0.0_r},
+    {  16, "S ", 1.80_r, -0.1_r,  0.5_r},
+    {   9, "F ", 1.47_r, -0.6_r, -0.5_r},
+    {  17, "CL", 1.75_r, -0.3_r,  0.5_r},
+    {  35, "BR", 1.85_r, -0.2_r,  0.5_r},
+    {  53, "I ", 1.98_r, -0.1_r,  0.5_r},
+    {  11, "NA", 2.27_r,  1.0_r,  0.0_r},
+    {  19, "K ", 2.75_r,  1.0_r,  0.0_r},
+    {  12, "MG", 1.73_r,  2.0_r,  0.0_r},
+    {  20, "CA", 2.31_r,  2.0_r,  0.0_r},
+    {  26, "FE", 2.00_r,  2.0_r,  0.0_r},
+    {  30, "ZN", 1.39_r,  2.0_r,  0.0_r},
 };
 
 // Fallback for unrecognized elements.

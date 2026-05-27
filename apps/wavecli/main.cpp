@@ -78,7 +78,9 @@ struct Args {
     Real        slice_t   = 4.0_r;
     bool        pulse_source = false;     // GaussianPulse instead of HarmonicSource
     Real        pulse_sigma_t = 0.6_r;
-    Real        beta_rho  = 0.3_r;        // refractive-index weight
+    Real        beta_rho  = 0.3_r;        // refractive-index weight, density channel
+    Real        beta_q    = 0.0_r;        // §9, polar/charge channel (default off)
+    Real        beta_h    = 0.0_r;        // §9, hydrophobic channel (default off)
 };
 
 void print_usage() {
@@ -102,6 +104,8 @@ void print_usage() {
     std::puts("                spectral fingerprinting); default is harmonic");
     std::puts("  --pulse-sigma S  Gaussian pulse sigma_t (default 0.6)");
     std::puts("  --beta-rho B  refractive-index weight per density unit (default 0.3)");
+    std::puts("  --beta-q B    polar/charge channel weight in n(x) (default 0 = off)");
+    std::puts("  --beta-h B    hydrophobic channel weight in n(x) (default 0 = off)");
 }
 
 std::optional<Args> parse_args(int argc, char** argv) {
@@ -136,6 +140,8 @@ std::optional<Args> parse_args(int argc, char** argv) {
         else if (s == "--pulse")     { a.pulse_source = true; }
         else if (s == "--pulse-sigma") { a.pulse_sigma_t = static_cast<Real>(std::atof(need("--pulse-sigma"))); }
         else if (s == "--beta-rho")  { a.beta_rho = static_cast<Real>(std::atof(need("--beta-rho"))); }
+        else if (s == "--beta-q")    { a.beta_q   = static_cast<Real>(std::atof(need("--beta-q"))); }
+        else if (s == "--beta-h")    { a.beta_h   = static_cast<Real>(std::atof(need("--beta-h"))); }
         else { std::fprintf(stderr, "unknown arg: %.*s\n", static_cast<int>(s.size()), s.data()); std::exit(2); }
     }
     if (a.mode == Args::Mode::None) {
@@ -212,14 +218,31 @@ int main(int argc, char** argv) {
     Grid<2> grid{IVec<2>{a.nx, a.ny}, Vec<2>{a.dx, a.dx}, scene.box_min};
     Real const c0 = 1.0_r;
 
-    // Density splat → refractive index → wave speed.
+    // Splat density, and optionally charge / hydrophobicity fields,
+    // into the medium per overview §6, §10, §11. Then assemble n(x)
+    // via §9 and let c(x) = c0 / n(x).
     Field<Real, 2> rho(grid, 0.0_r);
     splat_density(rho, scene);
+
+    std::unique_ptr<Field<Real, 2>> charge_field;
+    std::unique_ptr<Field<Real, 2>> hydro_field;
+    if (a.beta_q != Real{0}) {
+        charge_field = std::make_unique<Field<Real, 2>>(grid, 0.0_r);
+        splat_charge(*charge_field, scene);
+    }
+    if (a.beta_h != Real{0}) {
+        hydro_field = std::make_unique<Field<Real, 2>>(grid, 0.0_r);
+        splat_hydro(*hydro_field, scene);
+    }
 
     auto medium = Medium<2>::uniform(grid, c0);
     MediumWeights w;
     w.beta_rho = a.beta_rho;
-    build_medium_from_fields<2>(medium, &rho, nullptr, nullptr, c0, w);
+    w.beta_q   = a.beta_q;
+    w.beta_h   = a.beta_h;
+    build_medium_from_fields<2>(medium, &rho,
+                                charge_field.get(), hydro_field.get(),
+                                c0, w);
     apply_pml(medium, PmlSpec{/*cells=*/20, /*alpha_max_factor=*/2.0_r,
                               /*polynomial_order=*/3});
 
