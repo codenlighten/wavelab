@@ -5,19 +5,23 @@ add_library(wavelab::flags ALIAS wavelab_flags)
 
 if(MSVC)
     target_compile_options(wavelab_flags INTERFACE
-        /W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+        $<$<COMPILE_LANGUAGE:CXX>:/W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8>)
     if(WAVELAB_WERROR)
-        target_compile_options(wavelab_flags INTERFACE /WX)
+        target_compile_options(wavelab_flags INTERFACE
+            $<$<COMPILE_LANGUAGE:CXX>:/WX>)
     endif()
 else()
+    # Scope to CXX so nvcc (which parses its own subset of Werror values)
+    # doesn't get host-compiler flags shoved down its throat.
     target_compile_options(wavelab_flags INTERFACE
-        -Wall -Wextra -Wpedantic
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic
         -Wshadow -Wconversion -Wsign-conversion
         -Wnon-virtual-dtor -Woverloaded-virtual
         -Wnull-dereference -Wdouble-promotion
-        -Wformat=2)
+        -Wformat=2>)
     if(WAVELAB_WERROR)
-        target_compile_options(wavelab_flags INTERFACE -Werror)
+        target_compile_options(wavelab_flags INTERFACE
+            $<$<COMPILE_LANGUAGE:CXX>:-Werror>)
     endif()
 endif()
 

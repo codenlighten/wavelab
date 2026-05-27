@@ -4,7 +4,7 @@ include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 # get one fast compile + one test invocation. Each test_*.cpp just adds
 # TEST_CASEs into this binary.
 
-add_executable(wavelab_tests
+set(WAVELAB_TEST_SOURCES
     unit/test_main.cpp
     unit/test_types.cpp
     unit/test_grid.cpp
@@ -22,10 +22,20 @@ add_executable(wavelab_tests
     integration/test_determinism.cpp
     integration/test_binder_discrimination.cpp)
 
+if(WAVELAB_BUILD_CUDA)
+    list(APPEND WAVELAB_TEST_SOURCES unit/test_fdtd_cuda.cpp)
+endif()
+
+add_executable(wavelab_tests ${WAVELAB_TEST_SOURCES})
+
 target_link_libraries(wavelab_tests PRIVATE
     wavelab::core
     wavelab::flags
     doctest::doctest)
+
+if(WAVELAB_BUILD_CUDA)
+    target_link_libraries(wavelab_tests PRIVATE wavelab::cuda)
+endif()
 
 # Auto-register every TEST_CASE with CTest.
 doctest_discover_tests(wavelab_tests)

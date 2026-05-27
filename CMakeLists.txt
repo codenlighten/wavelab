@@ -4,6 +4,9 @@ project(wavelab
     DESCRIPTION "Wave-based molecular geometry engine (FDTD)"
     LANGUAGES CXX)
 
+# CUDA is enabled conditionally to avoid forcing nvcc on hosts without
+# a GPU. Detection runs after option parsing below.
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
@@ -27,13 +30,24 @@ option(WAVELAB_BUILD_TESTS       "Build unit + integration tests"          ON)
 option(WAVELAB_BUILD_GUI         "Build wavelab GUI (needs X11/GL dev libs)" ON)
 option(WAVELAB_BUILD_CLI         "Build headless wavecli runner"            ON)
 option(WAVELAB_BUILD_PYTHON      "Build pybind11 Python module"             ON)
+option(WAVELAB_BUILD_CUDA        "Build CUDA GPU backend (FdtdCuda)"        OFF)
 option(WAVELAB_BUILD_BENCH       "Build perf benchmarks"                    OFF)
+set(WAVELAB_CUDA_ARCH            "89" CACHE STRING
+    "CUDA compute capability (89 = RTX 6000 Ada / RTX 40-series).")
 option(WAVELAB_DOUBLE_PRECISION  "Use double instead of float for fields"   OFF)
 option(WAVELAB_USE_OPENMP        "Enable OpenMP parallelism"                ON)
 option(WAVELAB_SANITIZE          "Enable ASan + UBSan in Debug builds"      OFF)
 option(WAVELAB_WERROR            "Treat warnings as errors"                 ON)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
+
+if(WAVELAB_BUILD_CUDA)
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    set(CMAKE_CUDA_STANDARD 20)             # shared headers use concepts
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+    set(CMAKE_CUDA_ARCHITECTURES ${WAVELAB_CUDA_ARCH})
+endif()
 
 include(CompilerFlags)
 include(Dependencies)
@@ -77,6 +91,11 @@ message(STATUS "  Tests             : ${WAVELAB_BUILD_TESTS}")
 message(STATUS "  GUI app           : ${WAVELAB_BUILD_GUI}")
 message(STATUS "  CLI app           : ${WAVELAB_BUILD_CLI}")
 message(STATUS "  Python module     : ${WAVELAB_BUILD_PYTHON}")
+message(STATUS "  CUDA backend      : ${WAVELAB_BUILD_CUDA}")
+if(WAVELAB_BUILD_CUDA)
+    message(STATUS "  CUDA arch         : ${CMAKE_CUDA_ARCHITECTURES}")
+    message(STATUS "  CUDA toolkit      : ${CUDAToolkit_VERSION}")
+endif()
 message(STATUS "  Benchmarks        : ${WAVELAB_BUILD_BENCH}")
 message(STATUS "  Sanitizers        : ${WAVELAB_SANITIZE}")
 message(STATUS "")
