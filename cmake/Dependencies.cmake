@@ -96,3 +96,15 @@ if(WAVELAB_BUILD_GUI)
     target_include_directories(rlimgui PUBLIC ${rlimgui_SOURCE_DIR})
     target_link_libraries(rlimgui PUBLIC raylib imgui)
 endif()
+
+# ------------------------------------------------------------------
+# pybind11 (Python bindings)
+# ------------------------------------------------------------------
+if(WAVELAB_BUILD_PYTHON)
+    set(PYBIND11_FINDPYTHON ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(pybind11
+        GIT_REPOSITORY https://github.com/pybind/pybind11.git
+        GIT_TAG v2.13.6
+        GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(pybind11)
+endif()

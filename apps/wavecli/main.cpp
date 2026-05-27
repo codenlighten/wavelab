@@ -38,6 +38,7 @@
 #include "score/entropy.hpp"
 #include "score/scattering.hpp"
 #include "score/similarity.hpp"
+#include "score/calibration.hpp"
 #include "score/spectral.hpp"
 #include "source/harmonic.hpp"
 
@@ -61,6 +62,8 @@ struct Args {
     Mode        mode      = Mode::None;
     std::string subject;                   // kind or path
     std::string output    = "out.fp.json";
+    std::string prototype_dir;             // optional: dir of .fp.json
+    std::string csv_path;                  // optional: append CSV row
     Index       nx        = 200;
     Index       ny        = 200;
     Real        dx        = 0.5_r;
@@ -117,6 +120,8 @@ std::optional<Args> parse_args(int argc, char** argv) {
         }
         else if (s == "--slice-z")   { a.slice_z = static_cast<Real>(std::atof(need("--slice-z"))); a.slice_z_set = true; }
         else if (s == "--slice-t")   { a.slice_t = static_cast<Real>(std::atof(need("--slice-t"))); }
+        else if (s == "--prototype") { a.prototype_dir = need("--prototype"); }
+        else if (s == "--csv")       { a.csv_path = need("--csv"); }
         else { std::fprintf(stderr, "unknown arg: %.*s\n", static_cast<int>(s.size()), s.data()); std::exit(2); }
     }
     if (a.mode == Args::Mode::None) {
@@ -250,8 +255,36 @@ int main(int argc, char** argv) {
     fp.meta["atoms"]           = std::to_string(scene.atoms.size());
     fp.meta["mode"]            = (a.mode == Args::Mode::Pdb) ? "pdb" : "synthetic";
 
+    // Optional: correlate against a binder prototype directory.
+    if (!a.prototype_dir.empty()) {
+        try {
+            auto const binders = load_fingerprints_dir(a.prototype_dir);
+            if (binders.empty()) {
+                std::fprintf(stderr,
+                    "warning: --prototype dir %s contained no .fp.json files\n",
+                    a.prototype_dir.c_str());
+            } else {
+                auto proto = build_prototype(binders);
+                Real const r = correlate_with_prototype(fp, proto);
+                fp.scalars["binder_correlation"] = r;
+                fp.meta["prototype_count"] = std::to_string(proto.sample_count);
+            }
+        } catch (std::exception const& ex) {
+            std::fprintf(stderr, "prototype loading failed: %s\n", ex.what());
+        }
+    }
+
     write_fingerprint(fp, a.output);
     std::printf("wrote fingerprint: %s (%zu scalars, %zu spectral bins)\n",
                 a.output.c_str(), fp.scalars.size(), fp.spectral.size());
+
+    if (!a.csv_path.empty()) {
+        try {
+            append_fingerprint_csv(fp, a.csv_path);
+            std::printf("appended CSV row: %s\n", a.csv_path.c_str());
+        } catch (std::exception const& ex) {
+            std::fprintf(stderr, "csv append failed: %s\n", ex.what());
+        }
+    }
     return 0;
 }

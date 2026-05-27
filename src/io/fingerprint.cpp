@@ -1,8 +1,10 @@
 #include "io/fingerprint.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -260,6 +262,93 @@ Fingerprint read_fingerprint(std::filesystem::path const& path) {
     std::ostringstream buf;
     buf << in.rdbuf();
     return fingerprint_from_json(buf.str());
+}
+
+// --- CSV ----------------------------------------------------------------
+
+namespace {
+
+// CSV-safe quoting (only quote if needed; doubles embedded quotes).
+std::string csv_quote(std::string const& s) {
+    bool needs_quote = false;
+    for (char c : s) {
+        if (c == ',' || c == '"' || c == '\n' || c == '\r') { needs_quote = true; break; }
+    }
+    if (!needs_quote) return s;
+    std::string out = "\"";
+    for (char c : s) {
+        if (c == '"') out += "\"\"";
+        else out += c;
+    }
+    out += "\"";
+    return out;
+}
+
+std::string real_to_csv(Real v) {
+    if (!std::isfinite(static_cast<double>(v))) return "";
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.9g", static_cast<double>(v));
+    return buf;
+}
+
+} // namespace
+
+std::string fingerprint_csv_header(Fingerprint const& fp) {
+    std::ostringstream os;
+    os << "scene_name";
+    std::map<std::string, Real> sorted_scalars(fp.scalars.begin(), fp.scalars.end());
+    for (auto const& [k, _] : sorted_scalars) {
+        os << "," << csv_quote(k);
+    }
+    for (std::size_t i = 0; i < fp.spectral.size(); ++i) {
+        os << ",spectral_" << i;
+    }
+    os << "\n";
+    return os.str();
+}
+
+std::string fingerprint_csv_row(Fingerprint const& fp) {
+    std::ostringstream os;
+    os << csv_quote(fp.scene_name);
+    std::map<std::string, Real> sorted_scalars(fp.scalars.begin(), fp.scalars.end());
+    for (auto const& [_, v] : sorted_scalars) {
+        os << "," << real_to_csv(v);
+    }
+    for (Real v : fp.spectral) {
+        os << "," << real_to_csv(v);
+    }
+    os << "\n";
+    return os.str();
+}
+
+void append_fingerprint_csv(Fingerprint const& fp,
+                            std::filesystem::path const& path) {
+    bool const fresh = !std::filesystem::exists(path)
+                    || std::filesystem::file_size(path) == 0;
+    std::ofstream out(path, std::ios::app);
+    if (!out) throw std::runtime_error("append_fingerprint_csv: cannot open " + path.string());
+    if (fresh) out << fingerprint_csv_header(fp);
+    out << fingerprint_csv_row(fp);
+}
+
+std::vector<Fingerprint> load_fingerprints_dir(std::filesystem::path const& dir) {
+    std::vector<Fingerprint> out;
+    if (!std::filesystem::is_directory(dir)) {
+        throw std::runtime_error("load_fingerprints_dir: not a directory: " + dir.string());
+    }
+    // Sort entries for deterministic prototype ordering.
+    std::vector<std::filesystem::path> entries;
+    for (auto const& e : std::filesystem::directory_iterator(dir)) {
+        if (!e.is_regular_file()) continue;
+        if (e.path().extension() == ".json" || e.path().filename().string().ends_with(".fp.json")) {
+            entries.push_back(e.path());
+        }
+    }
+    std::sort(entries.begin(), entries.end());
+    for (auto const& p : entries) {
+        out.push_back(read_fingerprint(p));
+    }
+    return out;
 }
 
 } // namespace wavelab

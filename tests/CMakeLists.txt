@@ -19,7 +19,8 @@ add_executable(wavelab_tests
     unit/test_fdtd_3d.cpp
     integration/test_1ubq_pipeline.cpp
     integration/test_1ubq_full_3d.cpp
-    integration/test_determinism.cpp)
+    integration/test_determinism.cpp
+    integration/test_binder_discrimination.cpp)
 
 target_link_libraries(wavelab_tests PRIVATE
     wavelab::core
@@ -28,3 +29,15 @@ target_link_libraries(wavelab_tests PRIVATE
 
 # Auto-register every TEST_CASE with CTest.
 doctest_discover_tests(wavelab_tests)
+
+# Python smoke test (only when the binding module is built).
+if(WAVELAB_BUILD_PYTHON)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_FOUND)
+        add_test(NAME wavelab_python_smoke
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/python/test_pybind.py)
+        set_tests_properties(wavelab_python_smoke PROPERTIES
+            ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python")
+    endif()
+endif()

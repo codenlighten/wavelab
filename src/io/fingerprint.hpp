@@ -41,4 +41,24 @@ Fingerprint fingerprint_from_json(std::string const& text);
 void write_fingerprint(Fingerprint const& fp, std::filesystem::path const& path);
 Fingerprint read_fingerprint(std::filesystem::path const& path);
 
+// --- CSV export (one row per fingerprint) ----------------------------------
+//
+// Useful for batch analysis without Python — load with pandas, R, etc.
+// Header: scene_name + sorted scalar keys + spectral_0..spectral_N-1.
+// `append_fingerprint_csv` opens in append mode and writes a header only
+// when the file is new/empty.
+
+std::string fingerprint_csv_header(Fingerprint const& fp);
+std::string fingerprint_csv_row(Fingerprint const& fp);
+
+void append_fingerprint_csv(Fingerprint const& fp,
+                            std::filesystem::path const& path);
+
+// --- Directory loader ------------------------------------------------------
+//
+// Read every .fp.json under `dir` (non-recursive). Used by wavecli's
+// --prototype flag to build a BinderPrototype from a directory.
+
+std::vector<Fingerprint> load_fingerprints_dir(std::filesystem::path const& dir);
+
 } // namespace wavelab

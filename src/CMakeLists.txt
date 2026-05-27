@@ -5,6 +5,7 @@ add_library(wavelab_core STATIC
     molecule/parser_pdb.cpp
     molecule/parser_sdf.cpp
     score/spectral.cpp
+    score/calibration.cpp
     io/fingerprint.cpp)
 add_library(wavelab::core ALIAS wavelab_core)
 
