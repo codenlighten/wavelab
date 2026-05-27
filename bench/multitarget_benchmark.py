@@ -44,13 +44,17 @@ ROOT = Path("/root/wavelab/wavelab")
 
 
 @dataclass
+class ActiveLigand:
+    name: str               # for reporting (e.g., "saquinavir")
+    pdb: Path               # HETATM-extracted real binding pose
+
+
+@dataclass
 class Target:
     code: str
     apo_pdb: Path
-    active_pdb: Path        # HETATM-extracted real binding pose
-    active_name: str        # for reporting (e.g., "saquinavir")
     site_center: Tuple[float, float, float]
-    # Decoys to test — list of SDF files (small molecules from PubChem)
+    actives: List[ActiveLigand] = field(default_factory=list)
     decoys: List[Path] = field(default_factory=list)
 
 
@@ -175,7 +179,7 @@ def run_target(target: Target, *,
                beta_q: float, region_half: float) -> dict:
     print(f"\n========== TARGET {target.code} ==========")
     print(f"  apo:    {target.apo_pdb.name}")
-    print(f"  active: {target.active_pdb.name} ({target.active_name})")
+    print(f"  actives ({len(target.actives)}): {[a.name for a in target.actives]}")
     print(f"  site center: {target.site_center}")
     print(f"  decoys ({len(target.decoys)}): {[d.stem for d in target.decoys]}")
 
@@ -185,7 +189,6 @@ def run_target(target: Target, *,
     dock_dir = target_dir / "dock"
     dock_dir.mkdir(parents=True, exist_ok=True)
 
-    # Apo baseline (regional E denominator).
     t0 = time.time()
     print("  > running apo baseline...")
     apo_fp = score_apo(wavecli, target.apo_pdb, target.site_center,
@@ -194,19 +197,32 @@ def run_target(target: Target, *,
     apo_region_E = apo_fp["scalars"].get("regional_energy", 0.0)
     print(f"    regional_energy(apo) = {apo_region_E:.6e}")
 
-    # Active: crystal pose, single fingerprint.
-    print("  > scoring active (crystal pose)...")
-    active_fp = score_pose(wavecli, target.apo_pdb, target.active_pdb,
-                           target.site_center,
-                           nx, ny, nz, dx, freq, steps, beta_q, region_half,
-                           fp_dir / f"active_{target.active_name}.fp.json")
-    active_R_E = active_fp["scalars"]["regional_energy"] / apo_region_E if apo_region_E else 0.0
-    active_spec = active_fp["spectral"]
-    print(f"    regional_R_E(active) = {active_R_E:.4f}  "
-          f"spectrum len {len(active_spec)}")
+    # ALL actives: each gets its own fingerprint by placing at the
+    # binding-site centroid (NOT the active's native PDB coords —
+    # uniform placement makes the cross-active comparison fair).
+    active_fps: List[Tuple[str, dict]] = []
+    for a in target.actives:
+        print(f"  > scoring active {a.name} ({a.pdb.name})...")
+        fp = score_pose(wavecli, target.apo_pdb, a.pdb,
+                        target.site_center,
+                        nx, ny, nz, dx, freq, steps, beta_q, region_half,
+                        fp_dir / f"active_{a.name}.fp.json")
+        active_fps.append((a.name, fp))
+
+    # Build prototype as the average spectral fingerprint across actives.
+    # When N=1, the prototype IS the single active and cos(active,proto)=1
+    # trivially; with N≥2 the prototype is a real average and each
+    # individual active has its own cos < 1.
+    if not active_fps:
+        raise RuntimeError(f"no actives for target {target.code}")
+    proto_len = len(active_fps[0][1]["spectral"])
+    proto = [0.0] * proto_len
+    for _, fp in active_fps:
+        for i, v in enumerate(fp["spectral"]):
+            proto[i] += v / len(active_fps)
 
     # Decoys: Vina dock → top-K poses → wavecli on each pose.
-    decoy_results = []   # list of {name, scores, R_Es, specs}
+    decoy_results = []
     for sdf in target.decoys:
         print(f"  > docking decoy {sdf.stem}...")
         try:
@@ -214,7 +230,6 @@ def run_target(target: Target, *,
         except Exception as e:
             print(f"    DOCK FAILED: {e}")
             continue
-        print(f"    {len(poses)} poses; scoring each...")
         per_pose_R_E = []
         per_pose_spec = []
         for i, pose in enumerate(poses):
@@ -235,28 +250,26 @@ def run_target(target: Target, *,
             "specs": per_pose_spec,
         })
 
-    # Build prototype from active (single fingerprint here since we have 1
-    # crystal per target). Cosine similarity to that prototype is the
-    # discriminator; perturbation is |R_E - 1|.
-    proto = active_spec
-
-    # Aggregate per-candidate scores: best/mean over poses (for decoys).
+    # Per-candidate rows. Each active is scored against the AVERAGED
+    # prototype, so cos < 1 in general (only equal to 1 when N=1).
     rows = []
-    rows.append({
-        "name": target.active_name,
-        "kind": "ACTIVE",
-        "binderR_best": 1.0,        # trivially 1 (active = prototype)
-        "binderR_mean": 1.0,
-        "R_E_best":  active_R_E,
-        "R_E_mean":  active_R_E,
-        "n_poses":   1,
-        "pose_variance": 0.0,
-    })
+    for name, fp in active_fps:
+        sp = fp["spectral"]
+        R_E = fp["scalars"]["regional_energy"] / apo_region_E if apo_region_E else 0.0
+        rows.append({
+            "name": name,
+            "kind": "ACTIVE",
+            "binderR_best": cosine(sp, proto),
+            "binderR_mean": cosine(sp, proto),
+            "R_E_best":     R_E,
+            "R_E_mean":     R_E,
+            "n_poses":      1,
+            "pose_variance": 0.0,
+        })
     for dr in decoy_results:
         if not dr["specs"]:
             continue
         cosines = [cosine(s, proto) for s in dr["specs"]]
-        # Pose-variance proxy: spread in cosines across the top-K poses.
         var = (max(cosines) - min(cosines)) if len(cosines) > 1 else 0.0
         rows.append({
             "name": dr["name"],
@@ -269,9 +282,6 @@ def run_target(target: Target, *,
             "pose_variance": var,
         })
 
-    # AUC: fraction of (active, decoy) pairs where active outscores decoy.
-    # Two AUCs computed — by binderR_best (cosine vs prototype) and by
-    # |1 - R_E_best| (regional perturbation magnitude).
     actives = [r for r in rows if r["kind"] == "ACTIVE"]
     decoys  = [r for r in rows if r["kind"] == "decoy"]
     pairs = 0
@@ -324,28 +334,40 @@ def build_targets() -> List[Target]:
         ROOT / "data/ligands/decoys/acetaminophen.sdf",
     ])
     return [
+        # HIV-1 protease: THREE known inhibitors as actives (multi-active
+        # prototype is non-degenerate — each active gets cos < 1 against
+        # the averaged prototype, dissolving the 1-active tautology).
         Target(
             code="1HXB",
             apo_pdb=ROOT / "data/pdb/apo/1HXB_apo.pdb",
-            active_pdb=ROOT / "data/ligands/extracted/1HXB_ROC.pdb",
-            active_name="saquinavir",
             site_center=(18.257, -0.023, 11.416),
+            actives=[
+                ActiveLigand("saquinavir",
+                             ROOT / "data/ligands/extracted/1HXB_ROC.pdb"),
+                ActiveLigand("indinavir",
+                             ROOT / "data/ligands/extracted/1HSG_MK1.pdb"),
+                ActiveLigand("XK263",
+                             ROOT / "data/ligands/extracted/1HVR_XK2.pdb"),
+            ],
             decoys=list(decoy_set),
         ),
+        # Single-active targets (until we get more co-crystals — Phase 9
+        # data acquisition). Marked here so the AUC tautology caveat
+        # carries forward in the report.
         Target(
             code="3PTB",
             apo_pdb=ROOT / "data/pdb/apo/3PTB_apo.pdb",
-            active_pdb=ROOT / "data/ligands/extracted/3PTB_BEN.pdb",
-            active_name="benzamidine",
             site_center=(-1.759, 14.461, 16.916),
+            actives=[ActiveLigand("benzamidine",
+                                  ROOT / "data/ligands/extracted/3PTB_BEN.pdb")],
             decoys=list(decoy_set),
         ),
         Target(
             code="1STP",
             apo_pdb=ROOT / "data/pdb/apo/1STP_apo.pdb",
-            active_pdb=ROOT / "data/ligands/extracted/1STP_BTN.pdb",
-            active_name="biotin",
             site_center=(11.118, 1.680, -10.755),
+            actives=[ActiveLigand("biotin",
+                                  ROOT / "data/ligands/extracted/1STP_BTN.pdb")],
             decoys=list(decoy_set),
         ),
     ]

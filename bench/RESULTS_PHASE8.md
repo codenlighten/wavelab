@@ -82,6 +82,62 @@ The Phase 8 architecture works end-to-end on real co-crystal data:
 | Phase 8.3a: 2D pocket+ligand, regional R_E on 1ubq | 16,000× signal amplification per single-ligand test |
 | Phase 8.6: 3D pocket+ligand, real co-crystals × 3 targets | **3/3 gate pass; 1 target with genuine discrimination** |
 
+## Phase 9.1 follow-up: multi-active prototype for HIV-1 protease
+
+The single-active concern materialized when we re-ran 1HXB with all
+three known HIV protease inhibitors as actives — saquinavir (ROC),
+indinavir (MK1, from 1HSG), and XK263 (XK2, from 1HVR) — all placed
+at the 1HXB binding-site centroid, with the averaged spectral
+fingerprint as a non-degenerate prototype.
+
+Result with N=3 actives (5 decoys × 3 actives = 15 pairs):
+
+| Rank | Kind   | Candidate     | binderR_best | R_E_best |
+| ---: | :----- | :------------ | -----------: | -------: |
+| 1    | decoy  | acetaminophen |    0.999511  |   0.8979 |
+| 2    | ACTIVE | XK263         |    0.999179  |   0.8656 |
+| 3    | ACTIVE | indinavir     |    0.998824  |   0.8917 |
+| 4    | decoy  | aspirin       |    0.998233  |   0.9093 |
+| 5    | decoy  | caffeine      |    0.997879  |   0.9000 |
+| 6    | decoy  | glucose       |    0.997194  |   0.9179 |
+| 7    | ACTIVE | saquinavir    |    0.996696  |   0.4136 |
+| 8    | decoy  | benzene       |    0.995090  |   0.9394 |
+
+**AUC_cosine:  9/15 = 0.600**  (was 1.000 with N=1, but tautological)
+**AUC_R_E:    15/15 = 1.000**  (regional energy perturbation perfectly
+                                separates the three drugs from the five
+                                decoys)
+
+The 1.000 → 0.600 collapse in cosine AUC under multi-active is the
+honest reading: **the spectral cosine fingerprint, at this grid /
+source / probe configuration, is not strongly discriminative for HIV
+protease inhibitors against this 5-molecule decoy set.** The R_E AUC
+of 1.000 IS real signal — saquinavir / indinavir / XK263 all displace
+more binding-region energy than acetaminophen / aspirin / benzene /
+caffeine / glucose. The mechanism is unsurprising: drug-class
+inhibitors have 40–50 heavy atoms; decoys have 9–24.
+
+So the engine is doing science:
+* **R_E is the working discriminator** for the bigger-active case.
+  It's a clean physical scalar — "how much does this ligand disrupt
+  the energy field in the binding pocket" — and it ranks correctly.
+* **Spectral cosine is weak here** because the protein dominates the
+  fingerprint and the ligands' spectral contributions all sit on the
+  same "background" envelope.
+
+Most important Phase 9 follow-ups:
+1. **Multi-active prototypes for 3PTB and 1STP** (need more
+   co-crystals than the single 3PTB+BEN / 1STP+BTN we have today).
+2. **Higher-resolution probes for small ligands** — benzamidine
+   and biotin are only 9 and 16 atoms; the current 0.85 Å grid +
+   0.5 Hz source has wavelength much larger than the ligand. Smaller
+   dx and higher freq (better wavelength-to-feature matching) would
+   give them a chance.
+3. **Hybrid score combining cosine + R_E** — `HybridScore` already
+   exists in src/score/hybrid.hpp but isn't yet wired into the
+   benchmark. With weights chosen on calibration data, combined
+   cosine+R_E should outperform either alone.
+
 ## Reproduce
 
 On the droplet:
