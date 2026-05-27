@@ -138,6 +138,70 @@ Most important Phase 9 follow-ups:
    benchmark. With weights chosen on calibration data, combined
    cosine+R_E should outperform either alone.
 
+## Phase 9.2 follow-up: small-ligand grid tune for 3PTB (trypsin)
+
+Hypothesis: 3PTB's R_E AUC of 0.2 at the low-resolution config
+(`dx=0.85, freq=0.5`, wavelength only 2.4 cells) was resolution-
+limited; matching wavelength to the ~2.5 Å feature scale where
+benzamidine vs aspirin/caffeine differences live should reveal
+real signal.
+
+Tuned config: `dx=0.3, freq=0.4, steps=1500, nx=128`. Wavelength
+2.5 Å = 8.3 cells/wavelength (well-resolved). Steps bumped from 400
+to 1500 so the wave actually propagates from the corner source to
+the binding site (source-to-pocket ≈ 43 Å, needs ≥ 43 time units;
+old 400 steps × 0.069 dt = 27 time units was insufficient and gave
+all-machine-epsilon regional energies).
+
+Result (single-active prototype caveat still applies):
+
+| Rank | Kind   | Candidate     | binderR_best | R_E_best | wall-time |
+| ---: | :----- | :------------ | -----------: | -------: | --------: |
+| 1    | ACTIVE | benzamidine   |    1.000000  |   1.0728 | 856s      |
+| 2    | decoy  | benzene       |    0.999998  |   1.0456 |           |
+| 3    | decoy  | glucose       |    0.999998  |   1.0777 |           |
+| 4    | decoy  | acetaminophen |    0.999996  |   1.0738 |           |
+| 5    | decoy  | aspirin       |    0.999964  |   1.0669 |           |
+| 6    | decoy  | caffeine      |    0.999956  |   1.0477 |           |
+
+**AUC_R_E: 3/5 = 0.600** (was 0.200 at low res)
+**AUC_cosine: 5/5 = 1.000** (still tautological — only 1 active)
+
+Two qualitative observations:
+1. **Improvement is real but modest.** R_E AUC tripled (0.2 → 0.6),
+   confirming that 3PTB's low-res failure was *partly* resolution-
+   limited. Benzamidine now ranks above caffeine and benzene; it
+   still loses to glucose and acetaminophen, which are similarly-
+   sized polar molecules.
+2. **R_E sign flipped vs the low-res HIV protease case.** At
+   `dx=0.3`, all ligands give `R_E > 1` — they *increase* the
+   binding-region energy via refractive concentration of the wave.
+   At `dx=0.85` (low res), the same physics gave `R_E < 1` —
+   ligands acted as absorbers/dispersers. Different physical regime,
+   driven by whether the wavelength is large or small relative to
+   the atom-spacing features. Not a bug; a real engine response.
+
+The fundamental message: **R_E magnitude tracks ligand size + polarity
+more than it tracks "is this molecule a binder for THIS protein."**
+A trypsin-specific inhibitor (benzamidine) and a non-specific polar
+molecule (glucose, acetaminophen) of comparable size give comparable
+R_E. The engine is doing physics; it isn't doing biology.
+
+What WOULD give biology-relevant discrimination:
+* **Multi-probe spectra (Fingerprint v2, deferred 8.3b).** A single
+  probe captures only one slice of the scattered field; multiple
+  probes around the pocket would expose how the ligand reshapes the
+  full scattering pattern.
+* **Pocket-shape-matched scoring**, not point-source scoring. The
+  current setup uses one source far from the pocket — a uniform
+  plane-wave illumination from many angles, or a source PLACED IN
+  the pocket, would give different (and probably more biologically-
+  meaningful) responses.
+* **Calibrated multi-target prototypes per ligand class.** Build the
+  "trypsin-like binder" prototype from 4-5 known trypsin inhibitors
+  with varied scaffolds (the multi-active approach extended to
+  small ligands).
+
 ## Reproduce
 
 On the droplet:
