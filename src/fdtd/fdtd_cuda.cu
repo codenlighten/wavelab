@@ -76,6 +76,66 @@ __global__ void zero_boundary_2d_kernel(Real* un, int nx, int ny) {
     }
 }
 
+// ---------------------------------------------------------------------
+// 3D stencil kernel (7-point Laplacian)
+// ---------------------------------------------------------------------
+__global__ void fdtd_step_3d_kernel(
+        Real const* __restrict__ up,
+        Real const* __restrict__ uc,
+        Real* __restrict__       un,
+        Real const* __restrict__ cf,
+        Real const* __restrict__ af,
+        int   nx, int ny, int nz,
+        Real  dt, Real inv_dx) {
+    int i = blockIdx.z * blockDim.z + threadIdx.z;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < 1 || i >= nx - 1) return;
+    if (j < 1 || j >= ny - 1) return;
+    if (k < 1 || k >= nz - 1) return;
+
+    int   sy    = nz;             // y-stride
+    int   sx    = ny * nz;        // x-stride
+    int   idx   = i * sx + j * sy + k;
+    Real  c     = cf[idx];
+    Real  alpha = af[idx];
+    Real  lam   = c * dt * inv_dx;
+    Real  lam2  = lam * lam;
+    Real  a_co  = Real(2) - alpha * dt;
+    Real  b_co  = Real(1) - alpha * dt;
+    Real  lap   = uc[idx + sx] + uc[idx - sx]
+                + uc[idx + sy] + uc[idx - sy]
+                + uc[idx + 1]  + uc[idx - 1]
+                - Real(6) * uc[idx];
+    un[idx] = a_co * uc[idx] - b_co * up[idx] + lam2 * lap;
+}
+
+// Zero the six faces (Dirichlet) for 3D. One small kernel per face pair.
+__global__ void zero_boundary_3d_x_kernel(Real* un, int nx, int ny, int nz) {
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j >= ny || k >= nz) return;
+    int sy = nz, sx = ny * nz;
+    un[0 * sx + j * sy + k]         = Real(0);
+    un[(nx - 1) * sx + j * sy + k]  = Real(0);
+}
+__global__ void zero_boundary_3d_y_kernel(Real* un, int nx, int ny, int nz) {
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    int k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= nx || k >= nz) return;
+    int sy = nz, sx = ny * nz;
+    un[i * sx + 0 * sy + k]         = Real(0);
+    un[i * sx + (ny - 1) * sy + k]  = Real(0);
+}
+__global__ void zero_boundary_3d_z_kernel(Real* un, int nx, int ny, int nz) {
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= nx || j >= ny) return;
+    int sy = nz, sx = ny * nz;
+    un[i * sx + j * sy + 0]         = Real(0);
+    un[i * sx + j * sy + (nz - 1)]  = Real(0);
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------
@@ -166,15 +226,38 @@ struct FdtdCuda<D>::Impl {
                 d_up, d_uc, d_un, d_c, d_a, nx, ny, dt, inv_dx);
             WL_CUDA_CHECK(cudaGetLastError());
 
-            // Dirichlet zeroing on next-step boundary cells.
             int maxn = std::max(nx, ny);
             int tpb = 256;
             int blocks = (maxn + tpb - 1) / tpb;
             zero_boundary_2d_kernel<<<blocks, tpb>>>(d_un, nx, ny);
             WL_CUDA_CHECK(cudaGetLastError());
+        } else if constexpr (D == 3) {
+            int nx = static_cast<int>(grid.shape[0]);
+            int ny = static_cast<int>(grid.shape[1]);
+            int nz = static_cast<int>(grid.shape[2]);
+            Real inv_dx = Real(1) / grid.spacing[0];
+            dim3 block(8, 8, 4);          // (z fastest, y, x slowest) per kernel
+            dim3 gridDim(
+                static_cast<unsigned>((nz + block.x - 1) / block.x),
+                static_cast<unsigned>((ny + block.y - 1) / block.y),
+                static_cast<unsigned>((nx + block.z - 1) / block.z));
+            fdtd_step_3d_kernel<<<gridDim, block>>>(
+                d_up, d_uc, d_un, d_c, d_a, nx, ny, nz, dt, inv_dx);
+            WL_CUDA_CHECK(cudaGetLastError());
+
+            // Dirichlet face zeroing — three face-pair kernels.
+            dim3 face_block(16, 16);
+            auto blocks_for = [](int a, int b) {
+                return dim3(static_cast<unsigned>((a + 15) / 16),
+                            static_cast<unsigned>((b + 15) / 16));
+            };
+            zero_boundary_3d_x_kernel<<<blocks_for(nz, ny), face_block>>>(d_un, nx, ny, nz);
+            zero_boundary_3d_y_kernel<<<blocks_for(nz, nx), face_block>>>(d_un, nx, ny, nz);
+            zero_boundary_3d_z_kernel<<<blocks_for(ny, nx), face_block>>>(d_un, nx, ny, nz);
+            WL_CUDA_CHECK(cudaGetLastError());
         } else {
-            static_assert(D == 2,
-                "FdtdCuda<D>: only D=2 implemented in this Phase 7 cut");
+            static_assert(D == 2 || D == 3,
+                "FdtdCuda<D>: D=1 not implemented");
         }
     }
 
@@ -281,5 +364,6 @@ void FdtdCuda<D>::clear_sources() { impl_->sources.clear(); }
 
 // Explicit instantiations.
 template class FdtdCuda<2>;
+template class FdtdCuda<3>;
 
 } // namespace wavelab

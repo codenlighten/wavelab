@@ -60,5 +60,6 @@ private:
 };
 
 extern template class FdtdCuda<2>;
+extern template class FdtdCuda<3>;
 
 } // namespace wavelab
