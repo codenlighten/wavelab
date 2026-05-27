@@ -81,6 +81,13 @@ struct Args {
     Real        beta_rho  = 0.3_r;        // refractive-index weight, density channel
     Real        beta_q    = 0.0_r;        // §9, polar/charge channel (default off)
     Real        beta_h    = 0.0_r;        // §9, hydrophobic channel (default off)
+
+    // §15 pocket+ligand support.
+    std::string add_sdf_path;             // additional atom set to merge into the scene
+    std::string add_pdb_path;             // additional atom set from PDB
+    bool        place_at_set = false;     // user supplied a placement point
+    Vec<3>      place_at{0.0_r, 0.0_r, 0.0_r};  // world-coord centroid for added atoms
+    bool        include_hetatm = false;   // PDB option, useful for ligand-bound structures
 };
 
 void print_usage() {
@@ -106,6 +113,11 @@ void print_usage() {
     std::puts("  --beta-rho B  refractive-index weight per density unit (default 0.3)");
     std::puts("  --beta-q B    polar/charge channel weight in n(x) (default 0 = off)");
     std::puts("  --beta-h B    hydrophobic channel weight in n(x) (default 0 = off)");
+    std::puts("  --add-sdf F   load additional ligand atoms from SDF and merge (§15)");
+    std::puts("  --add-pdb F   load additional atoms from PDB and merge");
+    std::puts("  --place-at X,Y,Z  center the added atoms at this world coord");
+    std::puts("                (default: primary scene centroid)");
+    std::puts("  --include-hetatm  include HETATM records when parsing --pdb");
 }
 
 std::optional<Args> parse_args(int argc, char** argv) {
@@ -142,6 +154,19 @@ std::optional<Args> parse_args(int argc, char** argv) {
         else if (s == "--beta-rho")  { a.beta_rho = static_cast<Real>(std::atof(need("--beta-rho"))); }
         else if (s == "--beta-q")    { a.beta_q   = static_cast<Real>(std::atof(need("--beta-q"))); }
         else if (s == "--beta-h")    { a.beta_h   = static_cast<Real>(std::atof(need("--beta-h"))); }
+        else if (s == "--add-sdf")   { a.add_sdf_path = need("--add-sdf"); }
+        else if (s == "--add-pdb")   { a.add_pdb_path = need("--add-pdb"); }
+        else if (s == "--include-hetatm") { a.include_hetatm = true; }
+        else if (s == "--place-at")  {
+            char const* v = need("--place-at");
+            Real x, y, z;
+            if (std::sscanf(v, "%g,%g,%g", &x, &y, &z) != 3) {
+                std::fprintf(stderr, "--place-at expects X,Y,Z (got %s)\n", v);
+                std::exit(2);
+            }
+            a.place_at = Vec<3>{x, y, z};
+            a.place_at_set = true;
+        }
         else { std::fprintf(stderr, "unknown arg: %.*s\n", static_cast<int>(s.size()), s.data()); std::exit(2); }
     }
     if (a.mode == Args::Mode::None) {
@@ -181,7 +206,9 @@ MolecularScene<2> build_scene(Args const& a) {
     // slice through the midplane (or user z) to feed the 2D engine.
     MolecularScene<3> scene3d;
     if (a.mode == Args::Mode::Pdb) {
-        auto r3 = parse_pdb_file(a.subject);
+        PdbParseOptions opts;
+        opts.include_hetatm = a.include_hetatm;
+        auto r3 = parse_pdb_file(a.subject, opts);
         if (r3.scene.atoms.empty()) {
             std::fprintf(stderr, "no atoms parsed from %s\n", a.subject.c_str());
             std::exit(2);
@@ -195,6 +222,67 @@ MolecularScene<2> build_scene(Args const& a) {
         }
         scene3d = std::move(r3.scene);
     }
+
+    // §15 pocket+ligand: append a secondary atom set (translated to
+    // `place_at`, or the primary-scene centroid if not set).
+    auto append_translated = [&](MolecularScene<3>& extra) {
+        if (extra.atoms.empty()) return;
+        // Centroid of the extra atoms (so we can recenter on `target`).
+        Vec<3> ec{0, 0, 0};
+        for (auto const& at : extra.atoms) {
+            for (std::size_t d = 0; d < 3; ++d) ec[d] += at.pos[d];
+        }
+        Real const inv = Real{1} / static_cast<Real>(extra.atoms.size());
+        for (std::size_t d = 0; d < 3; ++d) ec[d] *= inv;
+
+        Vec<3> target = a.place_at;
+        if (!a.place_at_set) {
+            // Default: primary scene centroid.
+            Vec<3> pc{0, 0, 0};
+            for (auto const& at : scene3d.atoms) {
+                for (std::size_t d = 0; d < 3; ++d) pc[d] += at.pos[d];
+            }
+            Real const pinv = scene3d.atoms.empty()
+                ? Real{0}
+                : Real{1} / static_cast<Real>(scene3d.atoms.size());
+            for (std::size_t d = 0; d < 3; ++d) target[d] = pc[d] * pinv;
+        }
+
+        Vec<3> shift{target[0] - ec[0], target[1] - ec[1], target[2] - ec[2]};
+        for (auto& at : extra.atoms) {
+            for (std::size_t d = 0; d < 3; ++d) at.pos[d] += shift[d];
+        }
+        scene3d.atoms.insert(scene3d.atoms.end(),
+                             extra.atoms.begin(), extra.atoms.end());
+    };
+    if (!a.add_sdf_path.empty()) {
+        auto r = parse_sdf_file(a.add_sdf_path);
+        append_translated(r.scene);
+    }
+    if (!a.add_pdb_path.empty()) {
+        PdbParseOptions opts;
+        opts.include_hetatm = a.include_hetatm;
+        auto r = parse_pdb_file(a.add_pdb_path, opts);
+        append_translated(r.scene);
+    }
+
+    // Re-derive scene box now that atoms may have been added/translated.
+    if (!scene3d.atoms.empty()) {
+        Vec<3> mn = scene3d.atoms.front().pos;
+        Vec<3> mx = mn;
+        for (auto const& at : scene3d.atoms) {
+            for (std::size_t d = 0; d < 3; ++d) {
+                if (at.pos[d] < mn[d]) mn[d] = at.pos[d];
+                if (at.pos[d] > mx[d]) mx[d] = at.pos[d];
+            }
+        }
+        Real const pad = 5.0_r;
+        for (std::size_t d = 0; d < 3; ++d) {
+            scene3d.box_min[d] = mn[d] - pad;
+            scene3d.box_max[d] = mx[d] + pad;
+        }
+    }
+
     Real const z_mid = a.slice_z_set
         ? a.slice_z
         : 0.5_r * (scene3d.box_min[2] + scene3d.box_max[2]);
