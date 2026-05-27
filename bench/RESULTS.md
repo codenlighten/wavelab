@@ -69,28 +69,62 @@ decoys (benzene, acetaminophen) score lower than the medium-size ones
 in common with the prototype's average. This is shape-driven scoring
 in action.
 
-## What's actually being measured
+## Lighting up the polar channel — second pass
 
-The current engine consumes only atomic positions and van-der-Waals
-radii (Bondi 1964). Charge and hydrophobicity are loaded into the
-`Atom` struct from the element parameter table but currently are NOT
-wired into the medium assembly (only `ρ(x)` contributes to `n(x)` —
-the `Q(x)` and `H(x)` terms in overview §9 are `β_q = β_h = 0` by
-default).
+Wired up the `β_q · |Q(x)|` term from §9. `splat_charge` now runs
+when `--beta-q > 0`, using electronegativity-derived per-element
+pseudo-charges (H +0.1, C 0, N -0.4, O -0.5, S -0.1, P +0.5,
+halogens negative). Real per-molecule Gasteiger / QM partials are
+still TODO — these are crude, but they capture the polar-vs-non-polar
+ordering correctly.
 
-So this benchmark is a **shape + size** fingerprint, not a chemistry
-fingerprint. Two ways to make it more useful:
+Sweep over `β_q` × source mode (same 5 actives / 5 decoys, same grid,
+`β_rho = 0.5` throughout):
 
-1. **Tighten the family** — pick actives that are genuinely
-   shape-similar at the engine's resolution (e.g. the 4-ring
-   scaffold only, no pendant chains; or all kinase inhibitors of a
-   similar size class).
-2. **Light up the charge / hydro channels** — wire `β_q > 0` so
-   polar pockets shape the medium differently from hydrophobic
-   pockets. The infrastructure is already there
-   (`build_medium_from_fields` accepts the optional `charge` and
-   `hydro` fields); just needs partial-charge data per atom and the
-   wavecli flags to enable it.
+| β_q | source   | AUC  | Δ vs shape-only |
+| --- | -------- | ---- | --------------- |
+| 0.0 | harmonic | 0.60 | —               |
+| 0.5 | harmonic | 0.60 | +0.00           |
+| 1.0 | harmonic | 0.56 | −0.04           |
+| 2.0 | harmonic | 0.52 | −0.08           |
+| 0.0 | pulse    | 0.68 | —               |
+| 0.5 | pulse    | **0.76** | **+0.08**   |
+| 1.0 | pulse    | 0.76 | +0.08           |
+| 2.0 | pulse    | 0.76 | +0.08           |
+
+* **Pulse + polar gives the lift, harmonic doesn't.** Single-frequency
+  probing only sees the polar contrast as a shifted wave speed; the
+  spectrum stays a delta at the source frequency. Broadband probing
+  picks up the polar-induced multipath structure across many
+  frequencies.
+* **Lift saturates at β_q ≈ 0.5.** Beyond that, the polar channel
+  doesn't add new information on this 10-ligand set.
+
+The single ligand that moved most: **caffeine fell from rank #3 to
+#6** with the polar channel on. Caffeine has 4 nitrogens in the
+xanthine ring — very polar — so it now looks distinct from the
+mostly-hydrocarbon-scaffold steroids. Cholesterol stays at the
+bottom of the actives at rank #10; that's a real chemistry failure
+(its 8-carbon alkyl side chain makes it shape-different from the
+other steroids), not an engine failure.
+
+## What's still measured vs what isn't
+
+After this work the engine sees:
+- **shape + size** (always, via `ρ(x)`)
+- **polarity** (when `--beta-q > 0`, via `|Q(x)|`)
+- **hydrophobicity** (when `--beta-h > 0`, via `H(x)`)
+
+What we still don't have for serious use:
+- **Per-molecule Gasteiger / QM partial charges.** Per-element
+  pseudo-charges miss carbonyl-C polarization, the difference between
+  protonated and free amine, conjugation effects, etc. A small
+  Gasteiger pass or piping RDKit / OpenBabel charges into the SDF
+  parser would fix this.
+- **The pocket as the scoring substrate.** All benchmarks above are
+  ligand-only. Real binding affinity asks "does this ligand fit
+  THIS pocket" — that's the §15 R_E concept (pocket+ligand vs pocket
+  alone). Needs a small driver change to splat both into one medium.
 
 ## Reproduce
 
