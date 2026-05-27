@@ -64,6 +64,10 @@ def main() -> int:
     ap.add_argument("--dx", type=float, default=0.4)
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--freq", type=float, default=3.0)
+    ap.add_argument("--pulse", action="store_true",
+                    help="use broadband Gaussian pulse source")
+    ap.add_argument("--beta-rho", type=float, default=0.3,
+                    help="refractive-index weight per density unit")
     args = ap.parse_args()
 
     root = args.root
@@ -83,7 +87,10 @@ def main() -> int:
 
     common = ["--nx", str(args.nx), "--ny", str(args.ny),
               "--dx", str(args.dx), "--steps", str(args.steps),
-              "--freq", str(args.freq)]
+              "--freq", str(args.freq),
+              "--beta-rho", str(args.beta_rho)]
+    if args.pulse:
+        common.append("--pulse")
 
     print("actives:", [p.stem for p in actives])
     print("decoys: ", [p.stem for p in decoys])
@@ -117,13 +124,14 @@ def main() -> int:
         })
     scored.sort(key=lambda r: r["score"], reverse=True)
 
-    print(f"{'rank':>4} {'kind':>6} {'ligand':<15} {'binderR':>9} "
+    # Use more digits so very-close scores are still visible.
+    print(f"{'rank':>4} {'kind':>6} {'ligand':<15} {'binderR':>12} "
           f"{'atoms':>6} {'total_E':>10} {'entropy':>9}")
-    print("-" * 70)
+    print("-" * 75)
     for i, row in enumerate(scored, 1):
         marker = " **" if row["kind"] == "ACTIVE" else "   "
         print(f"{i:>4} {row['kind']:>6} {row['name']:<15} "
-              f"{row['score']:>7.4f}{marker} "
+              f"{row['score']:>10.7f}{marker} "
               f"{row['atoms']:>6d} {row['energy']:>10.3f} {row['entropy']:>9.4f}")
 
     # AUC-style discrimination: fraction of (active, decoy) pairs where
@@ -147,8 +155,8 @@ def main() -> int:
     # Mean score per group for an additional easy-to-read summary.
     act_mean = sum(r["score"] for r in scored if r["kind"] == "ACTIVE") / len(active_fps)
     dec_mean = sum(r["score"] for r in scored if r["kind"] == "decoy") / len(decoys)
-    print(f"mean binderR  actives: {act_mean:.4f}   decoys: {dec_mean:.4f}   "
-          f"separation: {act_mean - dec_mean:+.4f}")
+    print(f"mean binderR  actives: {act_mean:.7f}   decoys: {dec_mean:.7f}   "
+          f"separation: {act_mean - dec_mean:+.7f}")
 
     return 0
 
