@@ -31,6 +31,7 @@
 #include "medium/pml.hpp"
 #include "molecule/field_builder.hpp"
 #include "molecule/parser_pdb.hpp"
+#include "molecule/parser_sdf.hpp"
 #include "molecule/scene.hpp"
 #include "molecule/slice.hpp"
 #include "molecule/synthetic.hpp"
@@ -58,7 +59,7 @@ using namespace wavelab::literals;
 namespace {
 
 struct Args {
-    enum class Mode { Synthetic, Pdb, None };
+    enum class Mode { Synthetic, Pdb, Sdf, None };
     Mode        mode      = Mode::None;
     std::string subject;                   // kind or path
     std::string output    = "out.fp.json";
@@ -81,6 +82,7 @@ void print_usage() {
     std::puts("Usage:");
     std::puts("  wavecli --synthetic <single|dumbbell|pocket|slab> [options]");
     std::puts("  wavecli --pdb <file.pdb> [options]");
+    std::puts("  wavecli --sdf <file.sdf> [options]");
     std::puts("");
     std::puts("Options:");
     std::puts("  -o <path>     output fingerprint path (default out.fp.json)");
@@ -105,6 +107,7 @@ std::optional<Args> parse_args(int argc, char** argv) {
         if (s == "-h" || s == "--help") { print_usage(); return std::nullopt; }
         else if (s == "--synthetic") { a.mode = Args::Mode::Synthetic; a.subject = need("--synthetic"); }
         else if (s == "--pdb")       { a.mode = Args::Mode::Pdb;       a.subject = need("--pdb"); }
+        else if (s == "--sdf")       { a.mode = Args::Mode::Sdf;       a.subject = need("--sdf"); }
         else if (s == "-o")          { a.output = need("-o"); }
         else if (s == "--nx")        { a.nx = std::atoll(need("--nx")); }
         else if (s == "--ny")        { a.ny = std::atoll(need("--ny")); }
@@ -126,7 +129,7 @@ std::optional<Args> parse_args(int argc, char** argv) {
     }
     if (a.mode == Args::Mode::None) {
         print_usage();
-        std::fprintf(stderr, "\nerror: --synthetic or --pdb required\n");
+        std::fprintf(stderr, "\nerror: --synthetic, --pdb, or --sdf required\n");
         return std::nullopt;
     }
     if (a.probe_i < 0) a.probe_i = a.nx / 4;
@@ -158,16 +161,28 @@ MolecularScene<2> build_scene(Args const& a) {
         std::exit(2);
     }
 
-    // PDB path: load, slice through midplane (or user z), project to 2D.
-    auto r3 = parse_pdb_file(a.subject);
-    if (r3.scene.atoms.empty()) {
-        std::fprintf(stderr, "no atoms parsed from %s\n", a.subject.c_str());
-        std::exit(2);
+    // 3D scene loaders. Both PDB and SDF produce MolecularScene<3>; we
+    // slice through the midplane (or user z) to feed the 2D engine.
+    MolecularScene<3> scene3d;
+    if (a.mode == Args::Mode::Pdb) {
+        auto r3 = parse_pdb_file(a.subject);
+        if (r3.scene.atoms.empty()) {
+            std::fprintf(stderr, "no atoms parsed from %s\n", a.subject.c_str());
+            std::exit(2);
+        }
+        scene3d = std::move(r3.scene);
+    } else {
+        auto r3 = parse_sdf_file(a.subject);
+        if (r3.scene.atoms.empty()) {
+            std::fprintf(stderr, "no atoms parsed from %s\n", a.subject.c_str());
+            std::exit(2);
+        }
+        scene3d = std::move(r3.scene);
     }
     Real const z_mid = a.slice_z_set
         ? a.slice_z
-        : 0.5_r * (r3.scene.box_min[2] + r3.scene.box_max[2]);
-    return slice_scene_xy_centered(r3.scene, z_mid, a.slice_t);
+        : 0.5_r * (scene3d.box_min[2] + scene3d.box_max[2]);
+    return slice_scene_xy_centered(scene3d, z_mid, a.slice_t);
 }
 
 } // namespace
