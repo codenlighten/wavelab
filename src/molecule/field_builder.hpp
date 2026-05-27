@@ -156,8 +156,30 @@ inline void splat_weighted_(Field<Real, D>&          out,
                     out(i, j) += w * std::exp(-(dxv * dxv + dyv * dyv) * sig2_inv_half);
                 }
             }
-        } else {
-            static_assert(D == 2, "splat_weighted_: D=1/3 add as needed");
+        } else if constexpr (D == 3) {
+            Index const c0 = detail::world_to_cell<D>(g, a.pos[0], 0);
+            Index const c1 = detail::world_to_cell<D>(g, a.pos[1], 1);
+            Index const c2 = detail::world_to_cell<D>(g, a.pos[2], 2);
+            Index const i_lo = detail::clamp_index<D>(c0 - r_cells, 0, g.shape[0] - 1);
+            Index const i_hi = detail::clamp_index<D>(c0 + r_cells, 0, g.shape[0] - 1);
+            Index const j_lo = detail::clamp_index<D>(c1 - r_cells, 0, g.shape[1] - 1);
+            Index const j_hi = detail::clamp_index<D>(c1 + r_cells, 0, g.shape[1] - 1);
+            Index const k_lo = detail::clamp_index<D>(c2 - r_cells, 0, g.shape[2] - 1);
+            Index const k_hi = detail::clamp_index<D>(c2 + r_cells, 0, g.shape[2] - 1);
+            for (Index i = i_lo; i <= i_hi; ++i) {
+                Real const xc = g.origin[0] + (static_cast<Real>(i) + 0.5_r) * g.spacing[0];
+                Real const dxv = xc - a.pos[0];
+                for (Index j = j_lo; j <= j_hi; ++j) {
+                    Real const yc = g.origin[1] + (static_cast<Real>(j) + 0.5_r) * g.spacing[1];
+                    Real const dyv = yc - a.pos[1];
+                    for (Index k = k_lo; k <= k_hi; ++k) {
+                        Real const zc = g.origin[2] + (static_cast<Real>(k) + 0.5_r) * g.spacing[2];
+                        Real const dzv = zc - a.pos[2];
+                        out(i, j, k) += w * std::exp(
+                            -(dxv * dxv + dyv * dyv + dzv * dzv) * sig2_inv_half);
+                    }
+                }
+            }
         }
     }
 }

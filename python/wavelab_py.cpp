@@ -5,11 +5,12 @@
 // scalars + spectral vector. Power users can fall back to the C++ API.
 //
 //   import wavelab
-//   fp = wavelab.run_pdb("1ubq.pdb", nx=80, ny=80, steps=200)
-//   print(fp["total_energy"], fp["entropy"], fp["spectral"][:4])
+//   fp2 = wavelab.run_pdb("1ubq.pdb", nx=80, ny=80, steps=200)         # 2D
+//   fp3 = wavelab.run_pdb("1ubq.pdb", dim=3, nx=64, ny=64, nz=64)      # 3D
+//   print(fp2["scalars"]["total_energy"], fp2["spectral"][:4])
 //
 // `run_synthetic`, `build_prototype`, and `correlate` mirror wavecli's
-// CLI but return Python dicts directly.
+// CLI but return Python dicts directly. `run_synthetic` is 2D only.
 
 #include "core/types.hpp"
 #include "fdtd/fdtd_cpu_omp.hpp"
@@ -46,8 +47,10 @@ using namespace wavelab::literals;
 namespace {
 
 struct PipelineParams {
+    int   dim    = 2;          // 2 or 3
     Index nx     = 100;
     Index ny     = 100;
+    Index nz     = 100;
     Real  dx     = 0.5_r;
     Real  freq   = 2.0_r;
     Index steps  = 200;
@@ -57,49 +60,66 @@ struct PipelineParams {
     Real  slice_thickness = 4.0_r;
 };
 
-// Run the full pipeline on a MolecularScene<2> and return a Fingerprint.
-Fingerprint run_one_(MolecularScene<2> const& scene,
+// Pipeline body, templated on D. Mirrors wavecli's run_pipeline<D>.
+template <int D>
+Fingerprint run_one_(MolecularScene<D> const& scene,
                      PipelineParams const& p,
                      std::string const& scene_name) {
     if (scene.atoms.empty()) {
         throw std::runtime_error("run_pipeline: scene has no atoms");
     }
-    Grid<2> grid{IVec<2>{p.nx, p.ny}, Vec<2>{p.dx, p.dx}, scene.box_min};
+    Grid<D> grid = [&]() {
+        if constexpr (D == 2) {
+            return Grid<2>{IVec<2>{p.nx, p.ny}, Vec<2>{p.dx, p.dx},
+                           scene.box_min};
+        } else {
+            return Grid<3>{IVec<3>{p.nx, p.ny, p.nz},
+                           Vec<3>{p.dx, p.dx, p.dx}, scene.box_min};
+        }
+    }();
 
-    Field<Real, 2> rho(grid, 0.0_r);
+    Field<Real, D> rho(grid, 0.0_r);
     splat_density(rho, scene);
 
-    auto medium = Medium<2>::uniform(grid, p.c0);
+    auto medium = Medium<D>::uniform(grid, p.c0);
     MediumWeights w;
     w.beta_rho = p.beta_rho;
-    build_medium_from_fields<2>(medium, &rho, nullptr, nullptr, p.c0, w);
+    build_medium_from_fields<D>(medium, &rho, nullptr, nullptr, p.c0, w);
     apply_pml(medium, PmlSpec{p.pml_cells, /*alpha_max_factor=*/2.0_r,
                               /*polynomial_order=*/3});
 
-    Real const dt = 0.4_r * cfl_dt_max<2>(grid, p.c0);
-    FdtdCpuOmp<2> sim(grid, std::move(medium), dt);
-    sim.set_boundary(std::make_shared<Dirichlet2D>());
+    Real const dt = 0.4_r * cfl_dt_max<D>(grid, p.c0);
+    FdtdCpuOmp<D> sim(grid, std::move(medium), dt);
+    sim.set_boundary(make_dirichlet<D>());
 
-    IVec<2> src{p.pml_cells + 5, p.ny / 2};
-    sim.add_source(std::make_shared<HarmonicSource<2>>(src, /*amp=*/1.0_r, p.freq));
+    IVec<D> src = [&]() {
+        if constexpr (D == 2)
+            return IVec<2>{p.pml_cells + 5, p.ny / 2};
+        else
+            return IVec<3>{p.pml_cells + 5, p.ny / 2, p.nz / 2};
+    }();
+    sim.add_source(std::make_shared<HarmonicSource<D>>(src, /*amp=*/1.0_r, p.freq));
 
-    IVec<2> probe{p.nx / 4, p.ny / 2};
+    IVec<D> probe = [&]() {
+        if constexpr (D == 2) return IVec<2>{p.nx / 4, p.ny / 2};
+        else                  return IVec<3>{p.nx / 4, p.ny / 2, p.nz / 2};
+    }();
     std::vector<Real> series;
     series.reserve(static_cast<std::size_t>(p.steps));
     for (Index s = 0; s < p.steps; ++s) {
         sim.step();
-        probe_record<2>(sim.current(), probe, series);
+        probe_record<D>(sim.current(), probe, series);
     }
 
     Fingerprint fp;
     fp.scene_name = scene_name;
-    fp.scalars["total_energy"] = total_energy_2d(sim.current(), sim.previous(),
+    fp.scalars["total_energy"] = total_energy<D>(sim.current(), sim.previous(),
                                                   sim.wave_speed(), dt);
-    Field<Real, 2> e_field(grid, 0.0_r);
-    energy_density_field_2d(e_field, sim.current(), sim.previous(),
+    Field<Real, D> e_field(grid, 0.0_r);
+    energy_density_field<D>(e_field, sim.current(), sim.previous(),
                             sim.wave_speed(), dt);
-    fp.scalars["entropy"]     = energy_entropy<2>(e_field);
-    fp.scalars["focus_score"] = focus_score<2>(e_field);
+    fp.scalars["entropy"]     = energy_entropy<D>(e_field);
+    fp.scalars["focus_score"] = focus_score<D>(e_field);
 
     auto power = compute_power_spectrum(series);
     auto freqs = compute_frequency_axis(series.size(), dt);
@@ -114,11 +134,11 @@ Fingerprint run_one_(MolecularScene<2> const& scene,
             fp.spectral_freqs[i] = std::exp(log_lo + (static_cast<Real>(i) + 0.5_r) * dlog);
         }
     }
+    fp.meta["dim"]   = std::to_string(D);
     fp.meta["atoms"] = std::to_string(scene.atoms.size());
     return fp;
 }
 
-// Convert Fingerprint to a Python-friendly dict.
 py::dict fingerprint_to_dict_(Fingerprint const& fp) {
     py::dict d;
     d["scene_name"]     = fp.scene_name;
@@ -129,7 +149,6 @@ py::dict fingerprint_to_dict_(Fingerprint const& fp) {
     return d;
 }
 
-// Reconstruct Fingerprint from a dict (for build_prototype / correlate).
 Fingerprint dict_to_fingerprint_(py::dict const& d) {
     Fingerprint fp;
     if (d.contains("scene_name"))    fp.scene_name     = d["scene_name"].cast<std::string>();
@@ -142,8 +161,10 @@ Fingerprint dict_to_fingerprint_(py::dict const& d) {
 
 PipelineParams params_from_kwargs(py::kwargs const& k) {
     PipelineParams p;
+    if (k.contains("dim"))           p.dim   = k["dim"].cast<int>();
     if (k.contains("nx"))            p.nx    = k["nx"].cast<Index>();
     if (k.contains("ny"))            p.ny    = k["ny"].cast<Index>();
+    if (k.contains("nz"))            p.nz    = k["nz"].cast<Index>();
     if (k.contains("dx"))            p.dx    = k["dx"].cast<Real>();
     if (k.contains("freq"))          p.freq  = k["freq"].cast<Real>();
     if (k.contains("steps"))         p.steps = k["steps"].cast<Index>();
@@ -151,6 +172,9 @@ PipelineParams params_from_kwargs(py::kwargs const& k) {
     if (k.contains("c0"))            p.c0    = k["c0"].cast<Real>();
     if (k.contains("beta_rho"))      p.beta_rho = k["beta_rho"].cast<Real>();
     if (k.contains("slice_thickness")) p.slice_thickness = k["slice_thickness"].cast<Real>();
+    if (p.dim != 2 && p.dim != 3) {
+        throw std::invalid_argument("dim must be 2 or 3");
+    }
     return p;
 }
 
@@ -160,13 +184,19 @@ py::dict run_pdb_(std::string const& path, py::kwargs k) {
     if (r3.scene.atoms.empty()) {
         throw std::runtime_error("run_pdb: no atoms parsed from " + path);
     }
-    Real const z_mid = 0.5_r * (r3.scene.box_min[2] + r3.scene.box_max[2]);
-    auto scene = slice_scene_xy_centered(r3.scene, z_mid, p.slice_thickness);
-    return fingerprint_to_dict_(run_one_(scene, p, path));
+    if (p.dim == 2) {
+        Real const z_mid = 0.5_r * (r3.scene.box_min[2] + r3.scene.box_max[2]);
+        auto scene = slice_scene_xy_centered(r3.scene, z_mid, p.slice_thickness);
+        return fingerprint_to_dict_(run_one_<2>(scene, p, path));
+    }
+    return fingerprint_to_dict_(run_one_<3>(r3.scene, p, path));
 }
 
 py::dict run_synthetic_(std::string const& kind, py::kwargs k) {
     auto const p = params_from_kwargs(k);
+    if (p.dim != 2) {
+        throw std::invalid_argument("run_synthetic: D=3 synthetics not implemented");
+    }
     Real const box_x = static_cast<Real>(p.nx) * p.dx;
     Real const box_y = static_cast<Real>(p.ny) * p.dx;
     Vec<2> bmin{0.0_r, 0.0_r};
@@ -186,7 +216,7 @@ py::dict run_synthetic_(std::string const& kind, py::kwargs k) {
         center[0] - 1.0_r, center[0] + 1.0_r, 1.5_r, 2.0_r, bmin, bmax);
     else throw std::runtime_error("unknown synthetic kind: " + kind);
 
-    return fingerprint_to_dict_(run_one_(scene, p, kind));
+    return fingerprint_to_dict_(run_one_<2>(scene, p, kind));
 }
 
 py::dict build_prototype_(py::list const& binders_list) {
@@ -220,9 +250,11 @@ PYBIND11_MODULE(wavelab, m) {
     m.doc() = "wavelab — wave-based molecular geometry engine";
 
     m.def("run_pdb",       &run_pdb_,        py::arg("path"),
-          "Load a PDB, run a 2D midplane-slice simulation, return a fingerprint dict.");
+          "Load a PDB, run a 2D midplane-slice or full 3D simulation "
+          "(via kwarg dim=2|3), return a fingerprint dict.");
     m.def("run_synthetic", &run_synthetic_,  py::arg("kind"),
-          "Run on a synthetic scene (single|dumbbell|pocket|slab) and return a fingerprint dict.");
+          "Run on a synthetic 2D scene (single|dumbbell|pocket|slab); "
+          "returns a fingerprint dict.");
 
     m.def("build_prototype", &build_prototype_, py::arg("fingerprints"),
           "Aggregate K fingerprint dicts into a prototype dict (§34).");

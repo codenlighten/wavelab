@@ -15,6 +15,7 @@
 #include "core/grid.hpp"
 #include "core/types.hpp"
 
+#include <memory>
 #include <stdexcept>
 
 namespace wavelab {
@@ -265,5 +266,33 @@ public:
             }
     }
 };
+
+// ============================================================
+// Dim-generic factories
+// ============================================================
+// Convenience helpers so callers don't branch on D when constructing
+// a boundary. Returns a shared_ptr<BoundaryCondition<D>> ready to pass
+// to Stepper<D>::set_boundary.
+
+template <int D>
+inline std::shared_ptr<BoundaryCondition<D>> make_dirichlet() {
+    if constexpr (D == 1) return std::make_shared<Dirichlet1D>();
+    else if constexpr (D == 2) return std::make_shared<Dirichlet2D>();
+    else if constexpr (D == 3) return std::make_shared<Dirichlet3D>();
+}
+
+template <int D>
+inline std::shared_ptr<BoundaryCondition<D>> make_neumann() {
+    if constexpr (D == 1) return std::make_shared<Neumann1D>();
+    else if constexpr (D == 2) return std::make_shared<Neumann2D>();
+    else if constexpr (D == 3) return std::make_shared<Neumann3D>();
+}
+
+template <int D>
+inline std::shared_ptr<BoundaryCondition<D>> make_mur() {
+    if constexpr (D == 1) return std::make_shared<Mur1D>();
+    else if constexpr (D == 2) return std::make_shared<Mur2D>();
+    else if constexpr (D == 3) return std::make_shared<Mur3D>();
+}
 
 } // namespace wavelab

@@ -251,4 +251,40 @@ inline void energy_density_field_3d(Field<Real, 3>&       out,
     }
 }
 
+// ============================================================
+// Dim-generic dispatchers
+// ============================================================
+// The _1d / _2d / _3d implementations above ship the actual stencils;
+// these templates let callers write `total_energy<D>(...)` instead of
+// branching themselves. Used by templated wavecli / Python bindings.
+
+template <int D>
+inline Real total_energy(Field<Real, D> const& u_curr,
+                         Field<Real, D> const& u_prev,
+                         Real c, Real dt) noexcept {
+    if constexpr (D == 1) return total_energy_1d(u_curr, u_prev, c, dt);
+    else if constexpr (D == 2) return total_energy_2d(u_curr, u_prev, c, dt);
+    else if constexpr (D == 3) return total_energy_3d(u_curr, u_prev, c, dt);
+}
+
+template <int D>
+inline Real region_energy(Field<Real, D> const& u_curr,
+                          Field<Real, D> const& u_prev,
+                          Real c, Real dt,
+                          IVec<D> lo, IVec<D> hi) noexcept {
+    if constexpr (D == 2) return region_energy_2d(u_curr, u_prev, c, dt, lo, hi);
+    else if constexpr (D == 3) return region_energy_3d(u_curr, u_prev, c, dt, lo, hi);
+    else { static_assert(D == 2 || D == 3, "region_energy: D=1 not provided"); return Real{0}; }
+}
+
+template <int D>
+inline void energy_density_field(Field<Real, D>&       out,
+                                 Field<Real, D> const& u_curr,
+                                 Field<Real, D> const& u_prev,
+                                 Real c, Real dt) noexcept {
+    if constexpr (D == 1) energy_density_field_1d(out, u_curr, u_prev, c, dt);
+    else if constexpr (D == 2) energy_density_field_2d(out, u_curr, u_prev, c, dt);
+    else if constexpr (D == 3) energy_density_field_3d(out, u_curr, u_prev, c, dt);
+}
+
 } // namespace wavelab
