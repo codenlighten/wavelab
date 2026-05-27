@@ -19,3 +19,5 @@ data/synthetic/*
 !data/synthetic/.gitkeep
 # Keep small canonical test PDBs in-repo; .gitignore larger custom uploads.
 data/pdb/custom/
+# Keep small PubChem SDFs (a few KB each) tracked so a git pull restores
+# them — Vina decoy docking depends on them.

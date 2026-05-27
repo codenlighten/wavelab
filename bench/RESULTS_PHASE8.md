@@ -202,6 +202,67 @@ What WOULD give biology-relevant discrimination:
   with varied scaffolds (the multi-active approach extended to
   small ligands).
 
+## Phase 9.4 follow-up: in-pocket source
+
+Hypothesis: corner-source-far-from-pocket geometry is the reason
+spectral discrimination is weak; placing the source AT the
+binding-site centroid puts the ligand in the source's near-field
+where each atom matters proportionally more.
+
+Result (all three targets, in-pocket source, low-res 64³ grid):
+
+| Target | actives (N) | AUC_cos       | AUC_R_E       | active R_E | decoy R_E range |
+| :----- | ----------: | ------------: | ------------: | ---------: | --------------: |
+| 1HXB   | 3 (multi)   | 0.333 (↓0.27) | 0.533 (↓0.47) | varied     | varied          |
+| 3PTB   | 1           | 1.000 (taut.) | 0.200         | 0.0200     | 0.0100–0.0282   |
+| 1STP   | 1           | 1.000 (taut.) | 0.200         | 0.0253     | 0.0102–0.0317   |
+
+Signal magnitude EXPLODED: R_E is now 0.01–0.03 across the board
+(vs 0.4–1.0 with corner-source). The ligand is absorbing/scattering
+~97–99% of the source's near-field energy. But the residual 1–3%
+discrimination doesn't favor actives.
+
+3PTB R_E ranking by |1 - R_E| (biggest perturbation first):
+   caffeine 0.990 → aspirin 0.989 → glucose 0.988 → acetaminophen 0.983
+   → benzamidine 0.980 → benzene 0.972
+
+**Benzamidine is 5th of 6 by perturbation magnitude.** It beats
+only benzene (the smallest decoy). The four decoys with more atoms
+than benzamidine all out-perturb it.
+
+**The honest mechanism:** in-pocket regional R_E measures
+*atoms-in-the-source-near-field*. Caffeine has 24 atoms in the
+binding region; benzamidine has 9. The bigger molecule blocks more
+of the source's outward propagation, regardless of whether it's a
+real binder for THIS pocket.
+
+So in-pocket source amplifies the **physics** signal (much bigger
+energy displacement per ligand) but doesn't surface **biology**
+signal (which ligand specifically fits this pocket). At this engine
+chemistry — density + polar via β_q — the engine genuinely doesn't
+know about hydrogen-bond geometry, π-stacking, or shape
+complementarity beyond raw atom-density occupancy.
+
+What this rules out:
+* In-pocket source isn't a quick fix for small-ligand discrimination.
+  The geometry change amplifies signal but tracks the same "atoms
+  in the way" physics.
+
+What's still on the table for actually discriminating biology:
+* **Multi-probe spectral with probes around the pocket boundary**
+  (8.3b deferred). Different from regional R_E, which is a scalar.
+  A multi-probe spectrum captures HOW the ligand reshapes the
+  outgoing wave at multiple angles — closer to a "scattering
+  pattern" measurement than a "blocking" measurement.
+* **Hydrogen-bond-geometry-aware chemistry features.** The current
+  per-element pseudo-charges miss carbonyl polarity, amide H-bond
+  donors, aromatic π-systems. Real Gasteiger or QM partials would
+  let polarity actually distinguish "amidine that protonates and
+  H-bonds to Asp" from "benzene that doesn't."
+* **Probe at SPECIFIC chemistry locations**, not just centroid.
+  Trypsin's S1 pocket has Asp189 at the bottom — a probe there
+  would respond to ligands' positive charge specifically.
+
 ## Reproduce
 
 On the droplet:
