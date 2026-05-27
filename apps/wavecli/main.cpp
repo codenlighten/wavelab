@@ -41,6 +41,7 @@
 #include "score/similarity.hpp"
 #include "score/calibration.hpp"
 #include "score/spectral.hpp"
+#include "source/gaussian_pulse.hpp"
 #include "source/harmonic.hpp"
 
 #include <cmath>
@@ -75,6 +76,9 @@ struct Args {
     Real        slice_z   = 0.0_r;
     bool        slice_z_set = false;
     Real        slice_t   = 4.0_r;
+    bool        pulse_source = false;     // GaussianPulse instead of HarmonicSource
+    Real        pulse_sigma_t = 0.6_r;
+    Real        beta_rho  = 0.3_r;        // refractive-index weight
 };
 
 void print_usage() {
@@ -94,6 +98,10 @@ void print_usage() {
     std::puts("  --probe I,J   probe cell for spectrum");
     std::puts("  --slice-z Z   z-pos for PDB slice");
     std::puts("  --slice-t T   slice thickness (Å, default 4.0)");
+    std::puts("  --pulse       Gaussian-pulse source (broadband, recommended for");
+    std::puts("                spectral fingerprinting); default is harmonic");
+    std::puts("  --pulse-sigma S  Gaussian pulse sigma_t (default 0.6)");
+    std::puts("  --beta-rho B  refractive-index weight per density unit (default 0.3)");
 }
 
 std::optional<Args> parse_args(int argc, char** argv) {
@@ -125,6 +133,9 @@ std::optional<Args> parse_args(int argc, char** argv) {
         else if (s == "--slice-t")   { a.slice_t = static_cast<Real>(std::atof(need("--slice-t"))); }
         else if (s == "--prototype") { a.prototype_dir = need("--prototype"); }
         else if (s == "--csv")       { a.csv_path = need("--csv"); }
+        else if (s == "--pulse")     { a.pulse_source = true; }
+        else if (s == "--pulse-sigma") { a.pulse_sigma_t = static_cast<Real>(std::atof(need("--pulse-sigma"))); }
+        else if (s == "--beta-rho")  { a.beta_rho = static_cast<Real>(std::atof(need("--beta-rho"))); }
         else { std::fprintf(stderr, "unknown arg: %.*s\n", static_cast<int>(s.size()), s.data()); std::exit(2); }
     }
     if (a.mode == Args::Mode::None) {
@@ -132,8 +143,7 @@ std::optional<Args> parse_args(int argc, char** argv) {
         std::fprintf(stderr, "\nerror: --synthetic, --pdb, or --sdf required\n");
         return std::nullopt;
     }
-    if (a.probe_i < 0) a.probe_i = a.nx / 4;
-    if (a.probe_j < 0) a.probe_j = a.ny / 2;
+    // probe default now set later (after we know source mode), see main().
     return a;
 }
 
@@ -208,7 +218,7 @@ int main(int argc, char** argv) {
 
     auto medium = Medium<2>::uniform(grid, c0);
     MediumWeights w;
-    w.beta_rho = 0.3_r;
+    w.beta_rho = a.beta_rho;
     build_medium_from_fields<2>(medium, &rho, nullptr, nullptr, c0, w);
     apply_pml(medium, PmlSpec{/*cells=*/20, /*alpha_max_factor=*/2.0_r,
                               /*polynomial_order=*/3});
@@ -217,13 +227,25 @@ int main(int argc, char** argv) {
     FdtdCpuOmp<2> sim(grid, std::move(medium), dt);
     sim.set_boundary(std::make_shared<Dirichlet2D>());
 
-    // Source: harmonic at left edge, on-axis.
+    // Source: harmonic (default) or broadband Gaussian pulse. The pulse
+    // mode gives a richer spectrum and is what discrimination/scoring
+    // workflows usually want; harmonic stays for steady-state probing.
     IVec<2> src{25, a.ny / 2};
-    auto source = std::make_shared<HarmonicSource<2>>(src, /*amp=*/1.0_r, a.freq);
-    sim.add_source(source);
+    if (a.pulse_source) {
+        sim.add_source(std::make_shared<GaussianPulse<2>>(
+            src, /*amp=*/5.0_r, a.freq,
+            /*t0=*/3.0_r * a.pulse_sigma_t, a.pulse_sigma_t));
+    } else {
+        sim.add_source(std::make_shared<HarmonicSource<2>>(
+            src, /*amp=*/1.0_r, a.freq));
+    }
 
-    // Spectral probe — record one cell over the run.
-    IVec<2> probe{a.probe_i, a.probe_j};
+    // Spectral probe — by default sample PAST the scatterer (3*nx/4)
+    // so the recorded signal carries the scattered field; user can
+    // override with --probe.
+    Index probe_i = a.probe_i < 0 ? 3 * a.nx / 4 : a.probe_i;
+    Index probe_j = a.probe_j < 0 ? a.ny / 2     : a.probe_j;
+    IVec<2> probe{probe_i, probe_j};
     std::vector<Real> series;
     series.reserve(static_cast<std::size_t>(a.steps));
     for (Index s = 0; s < a.steps; ++s) {
